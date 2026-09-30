@@ -25,7 +25,7 @@ export async function MDXRenderer({ source }: { source: string }) {
   const code = String(
     await compile(source, {
       remarkPlugins: [remarkGfm, remarkMath],
-      rehypePlugins: [rehypeKatex],
+      rehypePlugins: [[rehypeKatex, { strict: "ignore" }]],
       outputFormat: "function-body",
     })
   );
