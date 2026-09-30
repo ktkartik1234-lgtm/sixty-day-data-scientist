@@ -1,0 +1,115 @@
+---
+day: 31
+title: "Attention and the Transformer"
+phase: 3
+minutes: 120
+objectives:
+  - "Explain queries, keys and values as a learned, content-based lookup"
+  - "Write and justify the scaled dot-product attention formula"
+  - "Describe multi-head attention, positional encoding and the full block"
+tags: ["deep-learning", "transformer", "attention", "phase-3"]
+papers:
+  - "attention-is-all-you-need"
+---
+
+Yesterday ended with three complaints about recurrence: no parallelism, long
+information paths, one lossy state. [Attention Is All You Need](/papers)
+deleted the recurrence and kept the good part — direct access to every past
+position.
+
+## From state to lookup
+
+An RNN answers "what have I seen" with one running summary. Attention instead
+lets every token address every other token directly: relevance is computed
+from the content, per pair, on the fly. There is no timestep ordering to
+respect, so all positions compute in parallel, and the path from token 1 to
+token 100 is one hop instead of ninety-nine.
+
+## Queries, keys, values
+
+Each token's embedding is projected three ways: a **query** ("what am I
+looking for"), a **key** ("what do I contain") and a **value** ("what do I
+contribute if selected"). Attention scores query-key matches with a dot
+product, softmaxes the scores into weights, and returns a weighted average of
+the values:
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$$
+
+The $\sqrt{d_k}$ is not decoration: dot products of random $d_k$-dimensional
+vectors have variance that grows with $d_k$, and large logits push softmax
+into its saturated, nearly-flat region where gradients vanish. Dividing by
+$\sqrt{d_k}$ keeps the logit variance near one.
+
+```python
+import torch
+import torch.nn as nn
+
+def attention(Q, K, V, mask=None):
+    d_k = Q.size(-1)
+    scores = Q @ K.transpose(-2, -1) / d_k ** 0.5
+    if mask is not None:
+        scores = scores.masked_fill(mask == 0, float("-inf"))
+    return scores.softmax(dim=-1) @ V
+
+x = torch.randn(1, 8, 64)                 # (batch, tokens, d_model)
+proj = nn.Linear(64, 192, bias=False)     # one fused QKV projection: 64 * 3
+Q, K, V = proj(x).chunk(3, dim=-1)
+print(attention(Q, K, V).shape)           # (1, 8, 64)
+```
+
+## Multi-head and positional encoding
+
+One head gives one averaged view of the sequence. **Multi-head** attention
+runs several heads in parallel, each in a smaller subspace, and concatenates
+their outputs: one head can track syntax, another coreference, another
+position. And since the recurrence is gone, order must be injected explicitly:
+**positional encodings** are added to the embeddings — classically sinusoids,
+
+$$PE_{(pos,\, 2i)} = \sin\!\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right) \qquad PE_{(pos,\, 2i+1)} = \cos\!\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right)$$
+
+so every position gets a unique fingerprint. (Modern models often use learned
+or rotary encodings; the requirement — inject order — never changes.)
+
+## The block, in words
+
+One Transformer encoder layer is:
+
+1. Multi-head self-attention over the token sequence
+2. A residual connection plus layer normalization (Day 28's skip connections)
+3. A small two-layer MLP applied per position, then residual and norm again
+
+Stack that block $N$ times. For a decoder, add a causal mask — token $t$ may
+not attend to later positions; that is the `mask` argument in the code above —
+and a final linear head over the vocabulary. Every large language model you
+have ever used is this recursion, scaled.
+
+<Callout kind="deep" title="Attention is a data-dependent weighted average">
+Convolution mixes neighbors with fixed learned weights; attention mixes all
+positions with weights computed from the current content — a soft,
+differentiable dictionary lookup. That single change is why one architecture
+handles text, images (Day 29's ViT), audio and proteins: it hard-codes almost
+nothing about the input's structure and learns the rest.
+</Callout>
+
+## Resources
+
+- [The Annotated Transformer (Harvard NLP)](https://nlp.seas.harvard.edu/annotated-transformer/) — the paper re-implemented line by line in PyTorch
+- [Jay Alammar — The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/) — the canonical visual walkthrough
+- [Karpathy — Let's build GPT from scratch](https://www.youtube.com/watch?v=kCc8FmEb1nY) — builds today's block end to end in one video
+
+## Exercise
+
+1. Add a causal mask to the attention call (lower-triangular ones via
+   `torch.tril`) and verify that each output row depends only on positions at
+   or before it.
+2. Measure softmax saturation: compute the row entropy of `softmax(QK^T)` with
+   and without the $\sqrt{d_k}$ scaling and compare.
+3. Work through the attention module of The Annotated Transformer and re-derive
+   every tensor shape on paper for batch 2, sequence 10, d_model 512, 8 heads.
+
+<Quiz
+  question="Why does scaled dot-product attention divide the scores by sqrt(d_k)?"
+  options={["To make the attention weights sum to one", "Because dot products of high-dimensional vectors grow large, which saturates the softmax and kills gradients; dividing keeps their variance stable", "To reduce the memory usage of the score matrix", "To normalize for the number of heads"]}
+  answer={1}
+  explanation="Softmax already makes weights sum to one. The scaling guards the gradients: unscaled logits grow with d_k and push softmax into a flat region with vanishing derivatives."
+/>

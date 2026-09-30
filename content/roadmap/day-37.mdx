@@ -1,0 +1,148 @@
+---
+day: 37
+title: "Embeddings and vector databases"
+phase: 4
+minutes: 90
+objectives:
+  - "Explain embedding spaces: text mapped to vectors where distance means similarity"
+  - "Choose between cosine, dot product and L2 — and know when they coincide"
+  - "Describe how ANN indexes (HNSW, IVF) trade recall for speed"
+  - "Chunk documents without destroying their meaning"
+tags: ["llm", "embeddings", "vectors", "search", "genai"]
+math:
+  - "linear-algebra/vectors-and-matrices"
+---
+
+Yesterday you paid for tokens; today you learn the representation that makes
+semantic search cheap. This is Day 2's dot products and cosine similarity
+doing industrial work — the full math lives in
+**[Vectors and matrices](/math/linear-algebra/vectors-and-matrices)**.
+
+## From text to points in space
+
+An embedding model is a function $$\phi(\text{text}) \in \mathbb{R}^d$$
+trained so that texts with similar meaning land near each other — typically
+$d$ between 384 and 3072. After that, "find related documents" becomes
+"find nearest vectors", which is linear algebra:
+
+```python
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
+emb = model.encode(["my loan approval is delayed", "credit card declined again"])
+print(emb.shape)     # (2, 384): two sentences, 384 coordinates each
+```
+
+## Cosine vs dot vs L2
+
+Three ways to compare vectors, one practical punchline:
+
+$$\cos(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\lVert \mathbf{u} \rVert \, \lVert \mathbf{v} \rVert}, \qquad \lVert \mathbf{u} - \mathbf{v} \rVert_2^2 = 2 - 2\cos(\mathbf{u}, \mathbf{v}) \;\; \text{for unit vectors}$$
+
+For L2-normalized embeddings — the standard — the dot product *is* the
+cosine, and squared L2 distance is a decreasing function of cosine. All
+three metrics rank neighbors identically. So normalize once at index time
+and never worry again:
+
+```python
+import numpy as np
+
+def normalize(X):
+    return X / np.linalg.norm(X, axis=1, keepdims=True)
+
+docs = model.encode(["refund status", "shipping delay", "refund policy for gifts"])
+q = model.encode(["where is my refund"])[0]
+
+D, qn = normalize(docs), q / np.linalg.norm(q)
+print(D @ qn)                          # dot == cosine after normalization
+print(np.linalg.norm(D - qn, axis=1))  # rank by L2: same order
+```
+
+## ANN indexes: the trick behind vector databases
+
+Brute force is one matrix product, $$O(N \cdot d)$$ — perfectly fine up to
+roughly a hundred thousand vectors. Past that, approximate nearest neighbor
+(ANN) indexes buy speed with a little recall:
+
+- **IVF** — k-means the corpus into lists; at query time scan only the
+  `nprobe` nearest lists. Fewer probes, faster queries, more misses.
+- **HNSW** — a multi-layer "skip list" graph of each point's near neighbors;
+  greedy search hops from coarse layer to fine, reaching the neighborhood in
+  a logarithmic-ish number of steps.
+
+Both expose a recall/latency knob. Always measure recall against brute force
+on a sample before trusting the index — you built that baseline below.
+
+## Chunking: where RAG projects silently fail
+
+Embedding a whole page averages every topic in it into one vector; embedding
+a 40-character fragment loses the context that gives words meaning. Split on
+structure (headings, paragraphs) when you can, with modest overlap so ideas
+straddling a boundary survive, and store metadata alongside every chunk:
+
+```python
+def chunk(text: str, size: int = 400, overlap: int = 50) -> list[str]:
+    step = size - overlap
+    return [text[i:i + size] for i in range(0, len(text), step)]
+```
+
+## Build: tiny brute-force semantic search
+
+```python
+import numpy as np
+
+class TinySearch:
+    def __init__(self, model_name="all-MiniLM-L6-v2"):
+        self.model = SentenceTransformer(model_name)
+        self.docs, self.M = [], None
+
+    def add(self, texts):
+        self.docs.extend(texts)
+        E = normalize(self.model.encode(texts))
+        self.M = E if self.M is None else np.vstack([self.M, E])
+
+    def search(self, query, k=3):
+        q = normalize(self.model.encode([query]))
+        scores = (self.M @ q.T).ravel()          # one matmul: cosine to all
+        top = np.argsort(-scores)[:k]
+        return [(self.docs[i], round(float(scores[i]), 3)) for i in top]
+
+s = TinySearch()
+s.add(["The refund window is 30 days.",
+       "Shipments leave the warehouse on Mondays.",
+       "Gift cards cannot be redeemed for cash."])
+print(s.search("how long do I have to return something?"))
+```
+
+<Callout kind="deep" title="Normalize once, then everything is a matmul">
+  After L2 normalization, cosine similarity between a query and an entire
+  corpus is a single matrix-vector product — that is why vector database APIs
+  feel like magic and why brute force remains a legitimate baseline at small
+  scale. Keep `TinySearch` around: on Day 38 it becomes the retrieval half of
+  RAG, and on Day 45 the arbiter of whether an ANN index is even needed.
+</Callout>
+
+## Resources
+
+- [Sentence Transformers docs](https://www.sbert.net/) — models, training and usage for embedding text.
+- [OpenAI embeddings guide](https://platform.openai.com/docs/guides/embeddings) — the API perspective, with chunking and cost notes.
+- [Faiss wiki](https://github.com/facebookresearch/faiss/wiki) — the reference ANN library; read the IVF and HNSW overviews.
+
+## Exercise
+
+1. Build `TinySearch` over 15 sentences you write yourself; test 5 queries
+   where you know the right answer. Note the one query where the correct
+   document does not rank first, and hypothesize why.
+2. Verify the identity numerically: for two unit vectors compute cosine by
+   the formula, by dot product, and squared L2 distance — confirm it equals
+   2 - 2 cos within float noise.
+3. Chunk a page of real text at 200, 400 and 800 characters (overlap 50);
+   embed each variant and ask 5 questions. Report which chunk size wins and
+   why, then commit the notebook.
+
+<Quiz
+  question="For L2-normalized embeddings, which statement is true?"
+  options={["Cosine similarity and dot product give the same ranking", "L2 distance is unrelated to cosine similarity", "Dot product requires a vector database", "Cosine similarity requires a GPU"]}
+  answer={0}
+  explanation="Normalization makes dot product equal cosine, and squared L2 equals 2 - 2 cos — so all three metrics order neighbors identically for unit vectors."
+/>

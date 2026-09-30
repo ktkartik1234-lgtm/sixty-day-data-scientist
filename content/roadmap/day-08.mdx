@@ -1,0 +1,111 @@
+---
+day: 8
+title: "Hypothesis testing: p-values done right"
+phase: 1
+minutes: 75
+objectives:
+  - "State null and alternative hypotheses precisely"
+  - "Run a Welch two-sample t-test and interpret the p-value honestly"
+  - "Reason about type I and type II errors"
+  - "Recognize and avoid the multiple-comparisons trap"
+tags: ["statistics", "ab-testing", "scipy"]
+math:
+  - "statistics/hypothesis-testing"
+---
+
+Day 6 showed that sample means wobble with a known spread. Hypothesis testing
+turns that wobble into decisions: is a gap between two groups too large to
+blame on chance alone?
+
+## The courtroom: null and alternative
+
+The **null hypothesis** $H_0$ says "nothing is going on" — same means, same
+behavior. The **alternative** $H_1$ says otherwise. You never prove $H_1$;
+you ask how surprising the data would be **if $H_0$ were true**. That surprise
+level is the p-value: the probability of data at least this extreme under the
+null. Small p means the boring world struggles to explain the data.
+
+## A t-test on two groups
+
+Welch's t-test compares means while letting variances differ:
+
+$$t = \frac{\bar{x}_1 - \bar{x}_2}{\sqrt{\dfrac{s_1^2}{n_1} + \dfrac{s_2^2}{n_2}}}$$
+
+```python
+import numpy as np
+from scipy import stats
+
+rng = np.random.default_rng(7)
+a = rng.normal(loc=50, scale=10, size=200)    # control
+b = rng.normal(loc=52, scale=10, size=200)    # treatment
+
+t_stat, p_value = stats.ttest_ind(a, b, equal_var=False)
+print(f"means: {a.mean():.2f} vs {b.mean():.2f}")
+print(f"t = {t_stat:.3f}, p = {p_value:.4f}")
+
+alpha = 0.05
+if p_value < alpha:
+    print("reject H0: the gap is hard to explain by chance alone")
+else:
+    print("fail to reject H0: not enough evidence yet")
+```
+
+## Two ways to be wrong
+
+- **Type I** — false alarm: reject a true null. Rate capped at
+  $\alpha$ (usually 0.05).
+- **Type II** — miss: keep a false null. Its rate is $\beta$;
+  **power** $= 1 - \beta$ rises with sample size and effect size.
+
+Every threshold is a trade: lower $\alpha$, fewer false alarms but more
+misses.
+
+## The multiple-comparisons trap
+
+Run enough tests and a "significant" result is guaranteed:
+
+```python
+hits = 0
+for _ in range(20):                     # 20 segment pairs, truly identical
+    x = rng.normal(50, 10, 100)
+    y = rng.normal(50, 10, 100)
+    if stats.ttest_ind(x, y).pvalue < 0.05:
+        hits += 1
+print(hits)    # expect about 1 — a "discovery" manufactured from noise
+```
+
+Twenty tests at $\alpha = 0.05$ give a $1 - 0.95^{20} \approx 64\%$ chance of
+at least one false alarm. The classic fix is Bonferroni: test each comparison
+at $\alpha / k$.
+
+<Callout kind="warn" title="P-hacking is real and it is career poison">
+  Testing many segments, peeking daily until p dips below 0.05, or picking the
+  outcome after seeing results manufactures significance from pure noise. A
+  p-value is only meaningful if the hypothesis *and* the stopping rule were
+  fixed before the data arrived. Decide the analysis first, then run it once.
+</Callout>
+
+## Resources
+
+- [StatQuest on YouTube](https://www.youtube.com/@statquest) — p-values and t-tests, explained without intimidation.
+- [xkcd 882: Significant](https://xkcd.com/882/) — the multiple-comparisons trap in six panels.
+- [scipy.stats reference](https://docs.scipy.org/doc/scipy/reference/stats.html) — `ttest_ind` and friends, officially documented.
+
+## Exercise
+
+1. Simulate control (mean 100, sd 15) and treatment (mean 104, sd 15) groups
+   of 150 each; run the Welch test and write a one-sentence plain-English
+   conclusion including both means and the p-value.
+2. Repeat with n=5 per group, then n=5000 per group with only a 0.2-point
+   difference. Record both p-values and write one sentence on what each shows
+   about sample size, significance, and importance.
+3. Rerun the 20-segment demo 100 times; histogram how many false alarms each
+   run produces, and compare the fraction of runs with at least one hit to
+   the theoretical 64 percent. Commit the notebook.
+
+<Quiz
+  question="A result comes back with p = 0.03. What does that number actually mean?"
+  options={["The null hypothesis has a 3 percent chance of being true", "If the null were true, data at least this extreme would appear about 3 percent of the time", "The effect has a 97 percent chance of replicating", "The experiment should stop because 3 percent is below 5 percent"]}
+  answer={1}
+  explanation="The p-value is computed assuming the null is true: it is the probability of the data (or something more extreme), not the probability of the hypothesis. It says nothing directly about replication."
+/>

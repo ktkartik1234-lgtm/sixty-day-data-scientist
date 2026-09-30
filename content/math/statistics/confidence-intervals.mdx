@@ -1,0 +1,129 @@
+---
+title: "Confidence intervals"
+summary: "Point estimates lie by omission — intervals that honestly contain the noise, computed classically or by bootstrap, and how not to misread them."
+order: 3
+---
+
+A validation accuracy of 0.87 sounds like a fact. It is actually one draw
+from a distribution of accuracies you could have gotten with a different
+sample of data. A **confidence interval** wraps that single number in an
+honest account of the uncertainty — and reading it correctly requires
+unlearning a very natural misreading.
+
+## What a confidence interval actually is
+
+The correct interpretation:
+
+> If you repeated the data collection many times and built a 95% interval
+> the same way each time, about 95% of those intervals would contain the
+> true value.
+
+The **procedure** is reliable; any **single interval** either contains the
+truth or does not, and you never find out which. The classic misreadings
+flip this:
+
+- "There is a 95% probability the true mean lies in *this* interval." No —
+  the true value is fixed, not random; the randomness was in your sample.
+- "95% of the data lies inside this interval." That is a prediction interval,
+  a much wider object.
+- "A 99% interval is better, so I will always use one." Wider intervals buy
+  confidence with precision — you may end up saying nothing useful.
+
+## A confidence interval for a mean
+
+For a sample of size $n$ with mean $\bar{x}$ and standard deviation $s$, the
+CLT plus a t-critical value give:
+
+$$\bar{x} \;\pm\; t^{*}_{n-1} \times \frac{s}{\sqrt{n}}$$
+
+Concretely: 36 customers spend $\bar{x} = 42$ dollars with $s = 12$. Then
+$\text{SE} = 12/6 = 2$, and with 35 degrees of freedom $t^{*} \approx 2.03$:
+
+$$42 \pm 2.03 \times 2 \;=\; (37.9,\; 46.1) \text{ dollars}$$
+
+The knob-turning is now familiar: intervals narrow like $1/\sqrt{n}$, widen
+with the $t^{*}$ you demand (95% vs 99%), and widen with the inherent
+spread $s$ of the data.
+
+## Bootstrap confidence intervals
+
+What if the statistic is ugly — a median, an AUC, a difference of
+accuracies — and no textbook formula exists? **Bootstrap** to the rescue:
+approximate the sampling distribution by resampling *your own data* with
+replacement, recomputing the statistic each time:
+
+```text
+given fitted model predictions and true labels y on n = 1000 test points:
+B = 2000
+for b in 1..B:
+    idx = draw n indices 0..n-1 uniformly WITH replacement
+    acc[b] = accuracy(y[idx], yhat[idx])      # same model, resampled data
+interval = percentiles of acc at 2.5% and 97.5%
+```
+
+No distributional assumptions, no formulas — just the empirical sampling
+distribution of your metric. For accuracy on a small holdout set this is
+often the only honest interval you can get, and it routinely reveals that
+"a 2-point improvement" is well inside the noise.
+
+## Why intervals beat point estimates
+
+Two models scoring 0.871 and 0.865 on a 500-row test set are effectively
+tied — the bootstrap intervals overlap almost completely — yet the point
+estimates alone will make you pick one and defend it. Intervals convert
+false precision into calibrated decisions:
+
+- **Model comparison:** overlap means "not distinguishable on this data",
+  which saves you from chasing noise.
+- **Deployment risk:** an accuracy of 0.87 with interval (0.82, 0.92) warns
+  the worst plausible case may be unacceptable.
+- **Progress reporting:** an improvement inside its own interval is not a
+  headline yet.
+
+<Callout kind="deep" title="Connection to ML">
+  Leaderboards and papers report a single test-set number because intervals
+  look indecisive. Professional practice is the opposite: quote the interval,
+  especially when the test set is small (capstone-style evaluation, days
+  55–60, will punish you for anything else). A point estimate without an
+  uncertainty claim is a hypothesis, not a result.
+</Callout>
+
+## Resources
+
+- [StatQuest — Confidence Intervals](https://www.youtube.com/watch?v=TqOeMYtOc1w) — the concept, clearly explained, with the bootstrap as a bonus.
+- [Seeing Theory — Frequentist Inference](https://seeing-theory.brown.edu/frequentist-inference/index.html) — build confidence intervals interactively.
+- [Khan Academy — Confidence intervals](https://www.khanacademy.org/math/statistics-probability/confidence-intervals-one-sample) — drills on the mean-interval formula.
+- [OpenIntro Statistics](https://www.openintro.org/book/os/) — chapter 5, including bootstrap and randomization methods.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  Your classifier scores a mean F1 of $\bar{x} = 0.81$ across 25 repeated
+  evaluation splits, with standard deviation $s = 0.10$ across splits.
+  Build the 95% confidence interval for the true mean F1, then judge a rival
+  model whose mean F1 is 0.84 on the same 25 splits.
+</Callout>
+
+<Solution>
+  The standard error of the mean F1 is
+
+  $$\text{SE} = \frac{s}{\sqrt{n}} = \frac{0.10}{\sqrt{25}} = 0.02$$
+
+  With $df = 24$ the 95% t-critical value is $t^{*} \approx 2.064$, so
+
+  $$0.81 \pm 2.064 \times 0.02 \;=\; 0.81 \pm 0.041 \;=\; (0.769,\; 0.851)$$
+
+  The rival's 0.84 sits *inside* your interval, so on 25 splits these models
+  are not statistically distinguishable — switching is a coin flip, not an
+  upgrade. To separate two models 3 points apart with $s = 0.10$ you would
+  need roughly $n \approx (2.064 \times 0.10 / 0.03)^2 \approx 48$ splits.
+  Had we used a bootstrap over test points instead, the logic is identical:
+  resample, rescore, take the 2.5% and 97.5% percentiles.
+</Solution>
+
+<Quiz
+  question="A 95% confidence interval for mean model accuracy is (0.80, 0.86). Which statement is actually correct?"
+  options={["There is a 95% probability the true accuracy is inside (0.80, 0.86)", "If sampling were repeated many times, about 95% of intervals built this way would contain the true accuracy", "95% of individual predictions fall between 0.80 and 0.86", "The model is correct on 95% of the data"]}
+  answer={1}
+  explanation="The confidence level describes the long-run reliability of the procedure, not the probability content of one fixed interval, and it says nothing about individual predictions."
+/>

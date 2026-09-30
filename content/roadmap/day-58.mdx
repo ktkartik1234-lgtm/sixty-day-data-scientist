@@ -1,0 +1,157 @@
+---
+day: 58
+title: "Evaluation, calibration and error analysis"
+phase: 6
+minutes: 90
+objectives:
+  - "Report PR-AUC as the headline and ROC-AUC as secondary, against honest baselines"
+  - "Draw and read calibration curves; explain why bankers need calibrated probabilities"
+  - "Choose the decision threshold from a cost matrix, never from the default 0.5"
+  - "Slice error analysis by cohort and put a bootstrap CI on the final metric"
+tags: ["evaluation", "calibration", "pr-auc", "bootstrap"]
+math:
+  - "probability/bayes-rule"
+  - "statistics/confidence-intervals"
+---
+
+Yesterday produced the best pipeline; today finds out what it is worth. The
+frozen test set is opened once, in order: headline metrics, calibration,
+threshold policy, cohort slices, and uncertainty on all of it.
+
+## PR-AUC headlines, ROC-AUC secondary
+
+With a 15 percent positive rate, precision and recall are the honest lens:
+
+$$\text{precision} = \frac{TP}{TP + FP}, \qquad \text{recall} = \frac{TP}{TP + FN}$$
+
+```python
+from sklearn.metrics import average_precision_score, roc_auc_score
+
+probs_val = pipe.predict_proba(X_val)[:, 1]
+probs_test = pipe.predict_proba(X_test)[:, 1]
+print("val  PR-AUC:", round(average_precision_score(y_val, probs_val), 3),
+      "| ROC-AUC:", round(roc_auc_score(y_val, probs_val), 3))
+print("test PR-AUC:", round(average_precision_score(y_test, probs_test), 3),
+      "| ROC-AUC:", round(roc_auc_score(y_test, probs_test), 3))
+print("random PR-AUC baseline:", round(y_val.mean(), 3))
+```
+
+Report PR-AUC as the headline because it resolves the class imbalance; keep
+ROC-AUC as secondary because stakeholders know it. Quote both against the
+prevalence baseline, so nobody mistakes an accuracy-style number for skill.
+
+## Calibration: why bankers care
+
+A score is a *ranking*; a probability is a *contract*. If the model says 0.30,
+roughly 30 percent of such customers should in fact be stressed — that is
+what lets a bank size an intervention, set a limit, or price an offer. Plot
+the reliability curve, compute the Brier score,
+
+$$\mathrm{Brier} = \frac{1}{n}\sum_{i=1}^{n}(p_i - y_i)^2,$$
+
+and repair miscalibration with a mapping fit on validation rows, applied
+unchanged to test rows (inside a full pipeline, that is
+`CalibratedClassifierCV`'s job):
+
+```python
+from sklearn.calibration import calibration_curve
+from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import brier_score_loss
+
+frac_pos, mean_pred = calibration_curve(y_val, probs_val, n_bins=10)
+
+iso = IsotonicRegression(out_of_bounds="clip")
+iso.fit(probs_val, y_val)                 # calibrate on validation
+probs_cal = iso.predict(probs_test)       # apply, unchanged, to test
+
+print("Brier before:", round(brier_score_loss(y_test, probs_test), 4))
+print("Brier after :", round(brier_score_loss(y_test, probs_cal), 4))
+```
+
+## Threshold as a business decision
+
+The default 0.5 encodes "a false alarm and a miss cost the same" — rarely
+true. Give the errors prices and let the threshold fall out: a calibrated
+score flags a customer exactly when the posterior, which Bayes' rule builds
+from likelihoods and the base rate $\pi$, crosses it —
+
+$$P(y=1 \mid x) = \frac{P(x \mid y=1)\,\pi}{P(x \mid y=1)\,\pi + P(x \mid y=0)\,(1-\pi)}$$
+
+```python
+best_t, best_cost = None, float("inf")
+for t in [i / 100 for i in range(5, 96)]:
+    pred = probs_cal >= t
+    fn = ((~pred) & (y_test == 1)).sum() * 10.0   # missed stress
+    fp = (pred & (y_test == 0)).sum() * 1.0       # needless outreach
+    if fn + fp < best_cost:
+        best_t, best_cost = t, fn + fp
+print("cost-minimising threshold:", best_t, "at total cost", best_cost)
+```
+
+With a 10-to-1 cost ratio the optimum lands well below 0.5. Write the cost
+matrix into the README — it is a policy statement someone will query.
+
+## Error analysis by cohort slices, with uncertainty
+
+Aggregate metrics hide exactly the failures that matter: slice the test set
+by segment, region, earning pattern and age band, then put a bootstrap
+confidence interval on the headline number.
+
+```python
+import numpy as np
+
+def slice_report(mask, name):
+    ap = average_precision_score(y_test[mask], probs_cal[mask])
+    print(f"{name:>28}  n={int(mask.sum()):>6}  PR-AUC={ap:.3f}")
+
+for seg in X_test["segment"].unique():
+    slice_report(X_test["segment"] == seg, f"segment={seg}")
+
+def bootstrap_pr_auc(y, p, n_boot=1000, seed=42):
+    rng = np.random.default_rng(seed)
+    scores = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, len(y), len(y))
+        if y.iloc[idx].nunique() < 2:
+            continue
+        scores.append(average_precision_score(y.iloc[idx], p[idx]))
+    return np.percentile(scores, [2.5, 97.5])
+
+lo, hi = bootstrap_pr_auc(y_test.reset_index(drop=True), probs_cal)
+print("95 percent CI for test PR-AUC:", round(lo, 3), "to", round(hi, 3))
+```
+
+A point estimate is a promise you cannot keep; the interval is the honest
+version, and it goes in the README next to every reported metric.
+
+<Callout kind="deep" title="Great AUC, broken bank">
+  Nothing about a high PR-AUC prevents the deployed model from being useless:
+  ranking is not pricing. A model can order customers perfectly and still be
+  undeployable if its probabilities are miscalibrated or its threshold was
+  set by default. Headline metric, calibration curve, cost-based threshold —
+  the trio is the minimum honest evaluation for any financial decision
+  system; report all three or report none.
+</Callout>
+
+## Resources
+
+- [scikit-learn — Probability calibration](https://scikit-learn.org/stable/modules/calibration.html)
+- [scikit-learn — Classification metrics](https://scikit-learn.org/stable/modules/model_evaluation.html#classification-metrics)
+- [Google ML crash course — Classification: ROC and AUC](https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc)
+
+## Exercise
+
+1. Produce the evaluation table: PR-AUC, ROC-AUC and Brier before and after
+   calibration, each with a bootstrap 95 percent CI, computed once on the
+   frozen test set.
+2. Choose the threshold from an explicit cost matrix — state your prices and
+   why — then report precision, recall and expected cost at that threshold.
+3. Slice performance on at least three cohort dimensions; name the worst
+   slice, hypothesize why it lags, and record it as a model-card limitation.
+
+<Quiz
+  question="The model ranks well (PR-AUC 0.42) but assigns stressed customers probabilities near 0.6 when their true rate is 0.2. For deploying a priced intervention, the first fix is…"
+  options={["Train more trees to push AUC higher", "Calibrate the probabilities (isotonic or sigmoid), then re-choose the threshold", "Switch the headline metric to ROC-AUC", "Raise the threshold to 0.8 and move on"]}
+  answer={1}
+  explanation="Pricing and reserve decisions consume probabilities, not rankings. Calibration repairs the mapping from score to outcome frequency; the threshold is then re-balanced on the corrected scale."
+/>

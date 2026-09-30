@@ -1,0 +1,136 @@
+---
+day: 51
+title: "Serving models: FastAPI from notebook to endpoint"
+phase: 5
+minutes: 90
+objectives:
+  - "Turn a trained model into a FastAPI service with typed request and response models"
+  - "Apply the load-once, serve-many pattern with a lifespan hook"
+  - "Add a health endpoint and measure p50 and p95 latency"
+tags: ["mlops", "fastapi", "serving", "api", "pydantic"]
+---
+
+The first half of phase 5 made models act; now we make them available. A model
+in a notebook is a hypothesis; behind an HTTP endpoint it is a product. Today
+the pivot from agentic AI to MLOps begins with the smallest shippable unit:
+one endpoint.
+
+## 1. Why notebooks do not ship
+
+Notebooks are exploration artifacts: state depends on the order you ran
+cells, logic hides in fifty unlabeled blocks, nothing is importable, testable
+or versioned. A deployed model needs a contract — a function with a signature
+that strangers can call over HTTP. The graduation path is always the same:
+notebook to script, script to package, package to service.
+
+## 2. The full minimal serving app
+
+```python
+# app.py — run with: uvicorn app:app --reload
+from contextlib import asynccontextmanager
+
+import joblib
+import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
+
+class PredictRequest(BaseModel):
+    age: int = Field(ge=18, le=100)
+    income: float = Field(ge=0)
+    debts: float = Field(ge=0)
+    employment_years: float = Field(ge=0)
+
+class PredictResponse(BaseModel):
+    stress_probability: float
+    model_version: str
+
+MODEL_VERSION = "v1.0.0"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.model = joblib.load("model.joblib")   # heavy work happens once
+    yield                                           # requests are served here
+    # shutdown cleanup (close pools, flush logs) would go here
+
+app = FastAPI(title="Financial Stress API", lifespan=lifespan)
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model_version": MODEL_VERSION}
+
+@app.post("/predict", response_model=PredictResponse)
+def predict(req: PredictRequest):
+    X = pd.DataFrame([req.model_dump()])
+    prob = float(app.state.model.predict_proba(X)[0, 1])
+    return PredictResponse(stress_probability=round(prob, 4),
+                           model_version=MODEL_VERSION)
+```
+
+That is a complete service: typed inputs rejected with a 422 before your
+model ever sees them, an OpenAPI schema auto-served at `/docs`, and a health
+probe for load balancers and orchestrators.
+
+## 3. Load once, serve many
+
+The cardinal sin is loading the model inside the request handler — every call
+pays a disk read and full deserialization, easily a hundred times the
+inference cost. The lifespan hook loads once at startup; handlers only touch
+`app.state.model`. For CPU-bound `def` handlers FastAPI runs a threadpool, so
+one process serves concurrent requests; scale out with
+`uvicorn app:app --workers 4` — each worker is a separate process with its
+own model copy, so watch memory.
+
+## 4. Latency basics
+
+A request's latency is network plus JSON parsing plus validation plus
+inference plus serialization. Measure percentiles, never averages:
+
+```python
+import statistics, time
+
+latencies = []
+for _ in range(100):
+    t0 = time.perf_counter()
+    # requests.post("http://localhost:8000/predict", json=payload)
+    latencies.append((time.perf_counter() - t0) * 1000)
+
+p95 = sorted(latencies)[94]
+print(f"p50 {statistics.median(latencies):.1f} ms | p95 {p95:.1f} ms")
+```
+
+The p95 is where users live: a p50 of 20 ms with a p95 of 900 ms means a tail
+(cold caches, oversized payloads, garbage collection) that averages hide. The
+first request after startup is always slower — warm the endpoint before
+benchmarks or go-live.
+
+<Callout kind="tip" title="The schema is the product">
+  The pydantic models are your API contract: they generate the documentation,
+  validate at the boundary, and break loudly when fields change. Version them
+  deliberately — a silent rename of `income` to `monthly_income` does not
+  crash anything; it just returns confidently wrong predictions to every
+  client.
+</Callout>
+
+## Resources
+
+- [FastAPI documentation](https://fastapi.tiangolo.com/) — path operations, lifespans and testing, clearly done.
+- [Pydantic documentation](https://docs.pydantic.dev/latest/) — validation and serialization at the boundary.
+- [Uvicorn deployment guide](https://www.uvicorn.org/deployment/) — workers, processes and production setups.
+
+## Exercise
+
+1. Train (or reuse) a model on the Financial Stress dataset, save it with
+   `joblib.dump`, serve it with the app above, and hit `/health` and
+   `/predict` with curl.
+2. Send malformed payloads (negative income, missing fields, an age of 5) and
+   confirm each gets a clean 422 without touching the model.
+3. Benchmark one hundred requests and report p50 and p95; then deliberately
+   move `joblib.load` into the handler, re-benchmark, and record the damage.
+   Commit the app and the numbers.
+
+<Quiz
+  question="Why load the model in a startup/lifespan hook instead of inside the predict handler?"
+  options={["FastAPI forbids model objects inside handlers", "It enables GPU acceleration automatically", "Loading is expensive; doing it once at startup keeps per-request latency down to inference plus serialization", "It is required for the /health endpoint to work"]}
+  answer={2}
+  explanation="Deserializing a model per request adds disk I/O and parsing to every call; loading once at startup amortizes that cost, leaving only inference and serialization in the request path."
+/>

@@ -1,0 +1,146 @@
+[
+  {
+    "slug": "attention-is-all-you-need",
+    "title": "Attention Is All You Need",
+    "authors": ["Ashish Vaswani", "Noam Shazeer", "Niki Parmar", "Jakob Uszkoreit", "Llion Jones", "Aidan N. Gomez", "Lukasz Kaiser", "Illia Polosukhin"],
+    "year": 2017,
+    "venue": "NeurIPS",
+    "tags": ["transformers", "deep-learning", "nlp"],
+    "link": "https://arxiv.org/abs/1706.03762",
+    "summary": "Introduces the Transformer: a sequence model built entirely on self-attention, dropping recurrence and convolution. Multi-head attention lets every token attend to every other token in parallel, which unlocked the scale that led to BERT, GPT and everything after.",
+    "keyTakeaways": [
+      "Scaled dot-product attention: softmax(QKᵀ/√d)V — one formula to internalize deeply.",
+      "Positional encodings inject order information that attention alone lacks.",
+      "Parallelism over sequence length is what made training at scale practical."
+    ],
+    "days": [33, 34, 35]
+  },
+  {
+    "slug": "random-forests",
+    "title": "Random Forests",
+    "authors": ["Leo Breiman"],
+    "year": 2001,
+    "venue": "Machine Learning",
+    "tags": ["classical-ml", "ensembles", "trees"],
+    "link": "https://link.springer.com/article/10.1023/A:1010933404324",
+    "summary": "Breiman's classic on bagging decision trees with random feature subsets at each split. Variance drops without bias blowing up, and out-of-bag error gives a free validation estimate. Still one of the strongest zero-tuning baselines for tabular data.",
+    "keyTakeaways": [
+      "Averaging many decorrelated trees reduces variance — the bias-variance trade-off in action.",
+      "OOB score is essentially free cross-validation.",
+      "Feature importance comes out of the box, though it has known biases."
+    ],
+    "days": [17, 18]
+  },
+  {
+    "slug": "xgboost",
+    "title": "XGBoost: A Scalable Tree Boosting System",
+    "authors": ["Tianqi Chen", "Carlos Guestrin"],
+    "year": 2016,
+    "venue": "KDD",
+    "tags": ["classical-ml", "ensembles", "trees"],
+    "link": "https://arxiv.org/abs/1603.02754",
+    "summary": "Gradient boosting engineered for speed and sparsity: second-order objective approximations, regularization on tree complexity, and a clever sparsity-aware split finding algorithm. The default winner on tabular problems, including the Financial Stress capstone here.",
+    "keyTakeaways": [
+      "Boosting fits trees to residuals sequentially — bias correction, unlike bagging.",
+      "Built-in L1/L2 regularization on leaf weights fights overfitting.",
+      "Handling of missing values via learned default directions is a quiet superpower."
+    ],
+    "days": [18, 19, 55]
+  },
+  {
+    "slug": "deep-residual-learning",
+    "title": "Deep Residual Learning for Image Recognition",
+    "authors": ["Kaiming He", "Xiangyu Zhang", "Shaoqing Ren", "Jian Sun"],
+    "year": 2015,
+    "venue": "CVPR",
+    "tags": ["deep-learning", "cnn", "computer-vision"],
+    "link": "https://arxiv.org/abs/1512.03385",
+    "summary": "Residual connections — learning F(x) + x instead of F(x) — made it possible to train networks hundreds of layers deep. The identity shortcut gives gradients a highway and remains a core trick inside modern transformers too.",
+    "keyTakeaways": [
+      "Identity shortcuts cost nothing and stabilize optimization dramatically.",
+      "Depth alone was never the blocker; degradation during training was.",
+      "Residual connections appear in transformer blocks — you already met them by Day 34."
+    ],
+    "days": [29, 30]
+  },
+  {
+    "slug": "language-models-are-few-shot-learners",
+    "title": "Language Models are Few-Shot Learners",
+    "authors": ["Tom B. Brown", "Benjamin Mann", "Nick Ryder", "et al."],
+    "year": 2020,
+    "venue": "NeurIPS",
+    "tags": ["llm", "genai", "nlp"],
+    "link": "https://arxiv.org/abs/2005.14165",
+    "summary": "The GPT-3 paper. At sufficient scale, autoregressive language models learn tasks from prompts alone — zero-, one- and few-shot — without gradient updates. This is the paper that turned prompting into a discipline.",
+    "keyTakeaways": [
+      "In-context learning: the prompt is the program.",
+      "Scale (parameters, data, compute) unlocked qualitatively new behavior.",
+      "Few-shot prompting still underpins modern RAG and agent design."
+    ],
+    "days": [35, 36]
+  },
+  {
+    "slug": "lora",
+    "title": "LoRA: Low-Rank Adaptation of Large Language Models",
+    "authors": ["Edward J. Hu", "Yelong Shen", "Phillip Wallis", "Zeyuan Allen-Zhu", "Yuanzhi Li", "Shean Wang", "Lu Wang", "Weizhu Chen"],
+    "year": 2021,
+    "venue": "ICLR",
+    "tags": ["llm", "fine-tuning", "genai"],
+    "link": "https://arxiv.org/abs/2106.09685",
+    "summary": "Freezes pretrained weights and injects trainable low-rank matrices (rank r ≪ d) into attention layers, cutting fine-tuning memory by orders of magnitude. The reason fine-tuning a 7B model on a single GPU is normal today.",
+    "keyTakeaways": [
+      "Update as ΔW = BA with B ∈ ℝ^{d×r}, A ∈ ℝ^{r×k} — linear algebra you met on Day 3 pays off.",
+      "Adapters can be swapped per task while sharing the frozen base model.",
+      "Rank is a tunable capacity dial: small r for narrow tasks."
+    ],
+    "days": [40, 41]
+  },
+  {
+    "slug": "rag",
+    "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+    "authors": ["Patrick Lewis", "Ethan Perez", "Aleksandra Piktus", "Fabio Petroni", "Vladimir Karpukhin", "Naman Goyal", "Heinrich Küttler", "Mike Lewis", "Wen-tau Yih", "Tim Rocktäschel", "Sebastian Riedel", "Douwe Kiela"],
+    "year": 2020,
+    "venue": "NeurIPS",
+    "tags": ["llm", "rag", "retrieval"],
+    "link": "https://arxiv.org/abs/2005.11401",
+    "summary": "Pairs a pretrained seq2seq model with a dense vector index of documents: retrieve the top-k passages for a query, condition generation on them. Gives LLMs up-to-date, citable knowledge without retraining — the architecture behind most production LLM applications today.",
+    "keyTakeaways": [
+      "Separate parametric knowledge (weights) from non-parametric knowledge (retrieved documents).",
+      "Dense retrievers beat sparse BM25 when questions don't share surface words with answers.",
+      "Generation conditioned on retrieved evidence reduces hallucination and enables attribution."
+    ],
+    "days": [37, 38, 45]
+  },
+  {
+    "slug": "diffusion-ddpm",
+    "title": "Denoising Diffusion Probabilistic Models",
+    "authors": ["Jonathan Ho", "Ajay Jain", "Pieter Abbeel"],
+    "year": 2020,
+    "venue": "NeurIPS",
+    "tags": ["genai", "diffusion", "deep-learning"],
+    "link": "https://arxiv.org/abs/2006.11239",
+    "summary": "Trains a network to reverse a gradual noising process: add noise to images in T steps, then learn to predict and remove that noise one step at a time. The framework behind Stable Diffusion, DALL-E-class models and modern image generators.",
+    "keyTakeaways": [
+      "Generation as iterative denoising — a Markov chain walked backwards.",
+      "The training objective is a simple weighted MSE on predicted noise.",
+      "Sampling quality trades off directly against number of steps."
+    ],
+    "days": [43, 45]
+  },
+  {
+    "slug": "vision-transformer",
+    "title": "An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale",
+    "authors": ["Alexey Dosovitskiy", "Lucas Beyer", "Alexander Kolesnikov", "Dirk Weissenborn", "Xiaohua Zhai", "Thomas Unterthiner", "et al."],
+    "year": 2020,
+    "venue": "ICLR",
+    "tags": ["transformers", "computer-vision", "deep-learning"],
+    "link": "https://arxiv.org/abs/2010.11929",
+    "summary": "Splits images into 16×16 patches, treats each patch as a token, and feeds the sequence to a standard Transformer. With enough data, pure attention outperforms CNNs with far less image-specific inductive bias — unifying vision and language architectures.",
+    "keyTakeaways": [
+      "Patch embeddings make images a sequence problem — one architecture for both modalities.",
+      "Inductive bias matters at small scale; data scale can replace it.",
+      "Pretraining on large data then fine-tuning transfers better than CNN pipelines."
+    ],
+    "days": [29, 31, 32, 42]
+  }
+]

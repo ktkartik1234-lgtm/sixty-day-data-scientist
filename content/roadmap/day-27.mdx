@@ -1,0 +1,118 @@
+---
+day: 27
+title: "Regularization: keeping networks honest"
+phase: 3
+minutes: 75
+objectives:
+  - "Diagnose overfitting from train and validation curves"
+  - "Apply dropout, batchnorm, weight decay, early stopping and augmentation"
+  - "Choose a regularization cocktail for a small dataset"
+tags: ["deep-learning", "regularization", "overfitting", "phase-3"]
+math:
+  - "optimization/convexity-loss-landscapes"
+---
+
+Yesterday's loop will happily train any network you give it; today's question
+is whether it learned the data or memorized it. Phase 2 already taught
+overfitting with trees — deep nets do it more spectacularly, and the toolbox
+differs. The geometry link: penalties and flat basins are two views of the
+same idea in the **[loss landscape](/math/optimization/convexity-loss-landscapes)**.
+
+## Reading the curves
+
+Train loss keeps falling while validation loss turns upward — that divergence
+is the signature. Plot both curves from epoch one; the gap is the diagnosis,
+and every lever below attacks the same failure: the network is memorizing
+idiosyncrasies of the training set that do not transfer. One caution from the
+**[loss landscapes](/math/optimization/convexity-loss-landscapes)** lesson:
+sharp, narrow minima fit the training data perfectly and generalize poorly,
+which is why a slightly worse training loss is often the better trade.
+
+## Weight decay: L2, again
+
+Add a penalty for large weights to the loss:
+
+$$\tilde{\mathcal{L}}(\theta) = \mathcal{L}(\theta) + \frac{\lambda}{2} \lVert \theta \rVert_2^2$$
+
+Small weights mean the output does not swing wildly when one input wiggles —
+a smoother, flatter function. One line in PyTorch:
+
+```python
+opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
+```
+
+## Dropout and batch normalization
+
+```python
+import torch.nn as nn
+
+model = nn.Sequential(
+    nn.Linear(64, 128),
+    nn.BatchNorm1d(128),
+    nn.ReLU(),
+    nn.Dropout(p=0.3),
+    nn.Linear(128, 4),
+)
+```
+
+Dropout randomly zeroes a fraction of activations during training. Each step
+trains a different thinned subnetwork, and the whole behaves like an ensemble
+of millions of weight-sharing models. At inference it switches off entirely —
+PyTorch rescales activations during training (inverted dropout), so no
+test-time arithmetic changes.
+
+BatchNorm normalizes each feature across the batch, keeping activations in a
+range where deep stacks train fast. Its regularizing side effect is real but
+secondary; its main job is optimization stability.
+
+## Early stopping and data augmentation
+
+- **Early stopping** — keep the checkpoint with the best validation metric and
+  stop after N epochs without improvement. Free, and it composes with
+  everything else.
+- **Augmentation** — label-preserving transformations that multiply your
+  effective dataset for nothing.
+
+```python
+from torchvision import transforms
+
+train_tf = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32, padding=4),
+    transforms.ToTensor(),
+])
+```
+
+A flipped cat is still a cat, so every flip is a fresh training example your
+model has to generalize across rather than memorize.
+
+<Callout kind="warn" title="model.train() versus model.eval()">
+Dropout and BatchNorm change behavior between training and inference. Call
+`model.train()` before training and `model.eval()` before validating or
+predicting — in eval mode BatchNorm uses running statistics and dropout is an
+identity. Forgetting `eval()` is the classic silent bug: validation metrics
+that wobble unpredictably because dropout is still firing at inference time.
+</Callout>
+
+## Resources
+
+- [Goodfellow, Bengio, Courville — Deep Learning, ch. 7: Regularization](https://www.deeplearningbook.org/contents/regularization.html)
+- [CS231n — Neural Networks Part 3: Learning and Evaluation](https://cs231n.github.io/neural-networks-3/) — regularization and hyperparameter search in practice
+- [PyTorch — Optimizing Model Parameters](https://pytorch.org/tutorials/beginner/basics/optimization_tutorial.html)
+
+## Exercise
+
+1. Overfit on purpose: train an overparameterized MLP on a 200-sample slice of
+   any dataset until train accuracy hits 1.0 while validation stalls. Screenshot
+   the curves — that gap is the enemy for the rest of the day.
+2. Add the toolbox one piece at a time — weight decay, then dropout, then early
+   stopping — and log validation accuracy after each addition.
+3. Remove the `model.eval()` call from your validation path, watch the metric
+   degrade, explain why in one comment line, fix it, and commit.
+
+<Quiz
+  question="At inference time, what does a Dropout(p=0.3) layer do?"
+  options={["Randomly zeroes 30 percent of activations, as in training", "Nothing — it is an identity, because scaling was already handled during training", "It doubles the activations to compensate", "It averages predictions over several dropout masks"]}
+  answer={1}
+  explanation="PyTorch uses inverted dropout: activations are scaled at training time so the expected value matches. In eval mode the module is a pure identity."
+/>

@@ -1,0 +1,103 @@
+---
+day: 50
+title: "Multi-agent systems: when teams of models help"
+phase: 5
+minutes: 80
+objectives:
+  - "Decompose a task into planner, worker and critic roles"
+  - "Implement handoffs with compact state summaries and shared memory"
+  - "Decide with numbers when a single model with tools beats a team"
+tags: ["agents", "multi-agent", "orchestration", "cost"]
+---
+
+Yesterday tools became a portable protocol; today's question is
+organizational: how many *models* does one task need? The honest answer is
+usually one — but you should earn it by building the team once and measuring.
+
+## 1. Role decomposition: planner, worker, critic
+
+The classic split divides cognitive labor. A planner decomposes the goal, a
+worker executes steps with tools, a critic verifies before anything ships.
+Each role is the same model wearing a different system prompt and a different
+toolset:
+
+```python
+PLANNER = "You are a planning agent. Break the goal into 3-5 concrete, verifiable steps."
+WORKER  = "You are a worker agent. Execute exactly the given step using the tools."
+CRITIC  = "You are a critic. Check the result against the step. Reply PASS or FAIL: reason."
+
+def run_team(goal: str) -> dict:
+    plan = call_llm(system=PLANNER, user=goal)          # 1 planning call
+    log = []
+    for step in plan:                                    # 2N+1 calls minimum
+        draft = call_llm(system=WORKER, user=step, tools=WORKER_TOOLS)
+        verdict = call_llm(system=CRITIC, user=f"step: {step}\nresult: {draft}")
+        log.append({"step": step, "draft": draft, "verdict": verdict})
+    return {"goal": goal, "log": log}
+```
+
+## 2. Handoffs and shared memory
+
+A **handoff** passes control from one role to another. Pass a compact summary
+of state, never the raw transcript: the critic needs the step, the result and
+the relevant context — not forty messages of tool output. Shared memory is a
+blackboard every role reads and writes (a dict in process, a small database
+across processes); it stops roles from re-deriving what another already
+learned and keeps every context window small.
+
+## 3. The cost explosion
+
+Teams multiply calls. The planner-worker-critic above spends 2N+1 model calls
+for N steps before retries; a tool-heavy step is several calls itself, so a
+five-step task can easily consume thirty or more calls and ten to fifty times
+the tokens of a single well-prompted agent. Latency compounds the same way,
+and failure modes multiply: a critic that keeps failing the worker produces a
+polite infinite loop that yesterday's guardrails must catch.
+
+## 4. When one model with tools is enough
+
+Default to a single agent with good tools. Escalate to roles only for a
+**measured** failure pattern:
+
+- Plans drift on long-horizon tasks — a separate planner with a cleaner
+  context helps.
+- The model produces plausible-but-wrong output that survives review — an
+  independent critic catches it.
+- Tool selection degrades beyond a handful of tools — split toolsets across
+  workers.
+
+Then prove it: run both architectures on the same ten to twenty evaluation
+tasks and compare accuracy, tokens and wall-clock time. Promote the team only
+if it wins by more than the cost it adds.
+
+<Callout kind="warn" title="Complexity for complexity's sake">
+  Multi-agent architectures are the most over-built pattern in applied LLM
+  work. Demos are seductive; production systems that look like teams are
+  usually one model, well-chosen tools and well-tested prompts. Every agent
+  boundary you add is a fresh place to lose context, stack retries and
+  multiply cost — add agents the way you would add microservices: when a
+  measured failure demands it, never because a diagram looked impressive.
+</Callout>
+
+## Resources
+
+- [Anthropic — Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) — workflows versus agents, and when to stop.
+- [LangGraph — Multi-agent concepts](https://langchain-ai.github.io/langgraph/concepts/multi_agent/) — supervisor and handoff patterns, formalized.
+- [Microsoft AutoGen](https://microsoft.github.io/autogen/) — conversation-driven multi-agent framework to compare against.
+
+## Exercise
+
+1. Build the planner-worker-critic team over yesterday's toolset, logging
+   tokens per role, and run it on three tasks of your choice.
+2. Benchmark it against a single agent with the same tools on ten evaluation
+   tasks; produce a small table of accuracy, total tokens and time.
+3. Implement one proper handoff: the worker passes a three-sentence state
+   summary (not the transcript) to the critic, and you measure the token
+   savings. Commit everything.
+
+<Quiz
+  question="You have a working single agent with tools. What is the strongest justification for adding a second role?"
+  options={["Multi-agent systems are more modern and impress stakeholders", "It always reduces total token usage", "A measured failure pattern — such as bad outputs surviving review — that an independent role demonstrably fixes", "A single agent cannot use more than three tools"]}
+  answer={2}
+  explanation="Role boundaries cost tokens, latency and new failure modes; they pay off only when evaluation shows a specific failure that role specialization measurably repairs."
+/>

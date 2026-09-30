@@ -1,0 +1,125 @@
+---
+day: 42
+title: "Multimodal models: vision + language"
+phase: 4
+minutes: 90
+objectives:
+  - "Recap how ViT turns an image into patch embeddings a transformer can eat"
+  - "Explain CLIP-style contrastive alignment and zero-shot classification"
+  - "Pick the right VLM pattern: caption, VQA, OCR, chart understanding"
+  - "Recognize when a text-only pipeline is the better engineering choice"
+tags: ["llm", "multimodal", "vision", "clip", "genai"]
+papers:
+  - "vision-transformer"
+---
+
+Yesterday you evaluated language models; today the models learn to see. The
+architectures are the ones you already know — the news is what counts as a
+token: pixels become patches.
+
+## ViT recap: an image is a sequence of patches
+
+Split an image into P x P patches, flatten each, linearly project to model
+dimension, add position embeddings, feed a standard transformer encoder:
+
+$$N_{patches} = \frac{H \cdot W}{P^2}$$
+
+A 224 x 224 image with 16 x 16 patches becomes 196 tokens — plus one
+learnable class token. The full story is in the Vision Transformer paper:
+
+```python
+import numpy as np
+
+img = np.random.randn(3, 224, 224)              # channels, height, width
+P, d = 16, 768
+patches = (img.reshape(3, 14, P, 14, P)         # cut a 14 x 14 patch grid
+              .transpose(1, 3, 0, 2, 4)         # (14, 14, 3, 16, 16)
+              .reshape(196, 3 * P * P))         # 196 flattened patches
+proj = np.random.randn(3 * P * P, d) / np.sqrt(3 * P * P)
+tokens = patches @ proj                         # (196, 768) patch embeddings
+```
+
+From here it is Day 33's transformer, unchanged — the patch projection is
+just a different tokenizer.
+
+## CLIP: two encoders, one space
+
+CLIP trains an image encoder and a text encoder together on hundreds of
+millions of image-caption pairs. The loss is contrastive: pull each matching
+image-text pair together, push the rest apart, over every pair in the batch:
+
+$$\mathcal{L} = -\frac{1}{N} \sum_{i=1}^{N} \log \frac{\exp(\cos(u_i, v_i)/\tau)}{\sum_{j=1}^{N} \exp(\cos(u_i, v_j)/\tau)}$$
+
+```python
+import numpy as np
+
+def cross_entropy(logits, y):
+    z = logits - logits.max(axis=1, keepdims=True)
+    logp = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+    return -logp[np.arange(len(y)), y].mean()
+
+def clip_loss(U, V, tau=0.07):
+    """U, V: (N, d) L2-normalized image and text embeddings."""
+    S = U @ V.T / tau                          # (N, N) similarity matrix
+    labels = np.arange(len(U))
+    return 0.5 * (cross_entropy(S, labels) + cross_entropy(S.T, labels))
+```
+
+The payoff: **zero-shot classification**. Embed class names as caption
+prompts, embed the image, take the nearest text. No training on your labels
+— the alignment did the work at pretraining time.
+
+## VLMs in practice: caption, VQA, OCR
+
+A vision-language model plugs a ViT encoder into an LLM through a small
+projection that maps visual tokens into the language model's embedding
+space (LLaVA-style). The workhorse patterns:
+
+- **Captioning** — alt-text, product catalogs, media tagging.
+- **VQA** — ask natural questions about an image, get answers in words.
+- **Document and OCR** — invoices, forms, screenshots; usually the highest
+  ROI business case, because it replaces brittle OCR-plus-rules pipelines.
+- **Chart understanding** — read the trend and the anomaly, not just the pixels.
+
+## When multimodal is overkill
+
+If OCR plus yesterday's text-only pipeline answers the question more
+cheaply, more auditably and just as accurately, ship that. Vision calls cost
+more tokens and latency, and VLMs hallucinate visual details with the same
+confidence as textual ones. Reserve multimodal for when layout, charts, or
+visual context genuinely carry the signal.
+
+<Callout kind="deep" title="Contrastive alignment is why image prompting works">
+  CLIP's shared space is why "a photo of a cat" classifies cat photos with no
+  training: the text embedding of the caption sits exactly where matching
+  images live. VLMs go one step further — visual tokens enter the LLM's
+  embedding space directly, so one attention mechanism reasons over pixels
+  and words at once. Alignment, then fusion: the two-step history of the
+  field.
+</Callout>
+
+## Resources
+
+- [Vision Transformer paper](https://arxiv.org/abs/2010.11929) — "An Image is Worth 16x16 Words"; the patch-token recipe.
+- [CLIP paper](https://arxiv.org/abs/2103.00020) — contrastive pretraining and zero-shot transfer at scale.
+- [Hugging Face CLIP docs](https://huggingface.co/docs/transformers/model_doc/clip) — run the real model in a few lines.
+
+## Exercise
+
+1. Generalize the patchify code to any square image size and patch size;
+   confirm a 384 x 384 image at P=16 yields 576 tokens, and that your
+   reshape-transpose produces correct patch boundaries (check one).
+2. With transformers installed: run CLIP zero-shot over 5 images against 4
+   caption prompts and print the similarity matrix. Without: simulate with
+   random normalized embeddings and verify `clip_loss` is minimal on the
+   diagonal.
+3. Take one screenshot and one invoice-like image. Compare a VLM against
+   OCR-plus-text-LLM on 3 questions each; record answers, cost and where
+   each pipeline broke. Commit the comparison table.
+
+<Quiz
+  question="What enables CLIP's zero-shot classification?"
+  options={["It fine-tunes on your labels at inference time", "Images and class-name texts share one embedding space thanks to contrastive training", "It attaches a traditional CNN classifier head per class", "Class names are one-hot encoded and matched by position"]}
+  answer={1}
+  explanation="Contrastive training aligns image and text embeddings in one space, so matching a photo to the caption of each class name is just nearest-neighbor search — no task-specific training."
+/>

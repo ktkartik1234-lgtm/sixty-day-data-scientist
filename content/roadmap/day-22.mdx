@@ -1,0 +1,134 @@
+---
+day: 22
+title: "Imbalanced data: class weights, SMOTE and thresholds"
+phase: 2
+minutes: 90
+objectives:
+  - "Show why accuracy collapses on imbalanced targets using the base rate"
+  - "Apply class weights as the first, safest remedy"
+  - "Resample with SMOTE inside a leak-proof pipeline and name its risks"
+  - "Move the decision threshold and report PR-AUC as the headline metric"
+tags: ["imbalanced-data", "smote", "metrics"]
+math:
+  - "probability/bayes-rule"
+---
+
+Phase 2 closes with the problem the capstone data actually has: the stressed
+households you most want to find are the minority. Day 16 hinted that PR-AUC
+beats ROC-AUC here; today is the full toolkit. Refresh
+**[Bayes' rule](/math/probability/bayes-rule)** — imbalance is, at heart, a
+statement about the prior.
+
+## Why accuracy lies
+
+With 1 percent positives, the model that always predicts "no" is 99 percent
+accurate — and perfectly useless. Bayes' rule shows why learning is hard
+when the prior is tiny:
+
+$$P(y = 1 \mid x) = \frac{P(x \mid y = 1)\, P(y = 1)}{P(x)}$$
+
+With $P(y = 1) = 0.01$, even a likelihood ratio ten-to-one in favor of
+"stressed" leaves the posterior near a tenth — so plain log-loss training
+inherits the prior and the scores cluster low. Establish the lie first:
+
+```python
+from sklearn.dummy import DummyClassifier
+
+dummy = DummyClassifier(strategy="most_frequent").fit(X_tr, y_tr)
+print(dummy.score(X_te, y_te))        # accuracy of doing nothing at all
+```
+
+## Class weights: change the loss, not the data
+
+`class_weight="balanced"` weights each class inversely to its frequency, so
+a missed positive costs as much as misses on the whole majority class. It is
+mathematically close to oversampling, without fabricating a single row:
+
+```python
+from sklearn.linear_model import LogisticRegression
+
+clf = LogisticRegression(class_weight="balanced", max_iter=1000)
+clf.fit(X_tr, y_tr)
+proba = clf.predict_proba(X_te)[:, 1]
+```
+
+Note what changes: the fitted probabilities shift (they are no longer
+calibrated to the true prior), but the *ranking* — what AUC and PR curves
+measure — usually improves for the minority class.
+
+## SMOTE: synthetic minorities and their risks
+
+SMOTE interpolates: for each minority point, draw a neighbor and synthesize
+a point on the segment between them,
+
+$$x_{new} = x_i + \lambda \left( x_{nn} - x_i \right), \qquad \lambda \in (0, 1)$$
+
+Three risks to know. Synthetic points can land **inside majority regions**,
+blurring exactly the boundary you care about. Class proportions stop being
+real, so probability calibration goes out the window. And resampling before
+the train/validation split is leakage — every synthetic point is built from
+validation rows. The `imblearn` pipeline exists because it resamples only
+inside `fit`, hence inside each CV fold:
+
+```python
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+
+pipe = Pipeline([
+    ("scale", StandardScaler()),
+    ("smote", SMOTE(random_state=0)),
+    ("model", LogisticRegression(max_iter=1000)),
+])
+scores = cross_val_score(pipe, X_tr, y_tr, scoring="average_precision", cv=5)
+```
+
+## Move the threshold; report PR-AUC
+
+The model gives a score; deployment picks a cut. Choose it from the PR curve
+against the operating requirement, not from tradition:
+
+```python
+from sklearn.metrics import average_precision_score, precision_recall_curve
+
+prec, rec, thr = precision_recall_curve(y_te, proba)
+f1 = 2 * prec * rec / (prec + rec + 1e-12)
+best_t = thr[f1[:-1].argmax()]        # drop the last point: it has no threshold
+print("PR-AUC:", average_precision_score(y_te, proba).round(4))
+```
+
+On imbalanced problems, PR-AUC (average precision) is the headline: it is
+computed from precision and recall alone, so the vast negative class cannot
+dilute it, and it answers the question stakeholders actually ask — when this
+model says "stressed", how often is it right?
+
+<Callout kind="tip" title="Order of operations for imbalance">
+  Fix the metric first (PR-AUC), then try class weights — a one-argument
+  change with no fabricated data. Reach for SMOTE only with a leak-proof
+  pipeline and a real improvement to show for it. And remember Day 19: any
+  resampling, encoding or scaling fitted before the split is leakage, no
+  matter how standard the library call looks.
+</Callout>
+
+## Resources
+
+- [imbalanced-learn — user guide](https://imbalanced-learn.org/stable/)
+- [Chawla et al. — SMOTE (arXiv)](https://arxiv.org/abs/1106.1813)
+- [scikit-learn — classification metrics](https://scikit-learn.org/stable/modules/model_evaluation.html#classification-metrics)
+- [Google ML crash course — imbalanced data](https://developers.google.com/machine-learning/data-prep/construct/sampling-splitting/imbalanced-data)
+
+## Exercise
+
+1. Baseline first: report accuracy and PR-AUC for the most-frequent dummy
+   classifier and for plain logistic regression, side by side.
+2. Compare `class_weight="balanced"` against SMOTE inside leak-proof
+   pipelines with stratified 5-fold CV, scoring `average_precision`.
+3. From the PR curve, pick the threshold that catches at least 80 percent of
+   stressed households, and report the precision you must accept there;
+   commit the curve, the threshold and the verdict.
+
+<Quiz
+  question="On data with 1% positives, which headline metric best captures 'finding positives without drowning in false alarms'?"
+  options={["Accuracy", "ROC-AUC", "PR-AUC (average precision)", "Mean squared error"]}
+  answer={2}
+  explanation="PR-AUC is driven purely by precision and recall on the positive class. With 1% positives a ROC-AUC of 0.9 can hide a precision near 0.05, because true negatives flood the false-positive rate — PR-AUC exposes what accuracy and ROC-AUC hide."
+/>

@@ -1,0 +1,205 @@
+---
+day: 1
+title: "Set up your toolkit: Python, Jupyter, Git & the scientific stack"
+phase: 1
+minutes: 90
+objectives:
+  - "Install Miniconda (or uv) and create a dedicated environment for the challenge"
+  - "Get comfortable in Jupyter Lab: cells, kernels, markdown, keyboard shortcuts"
+  - "Initialize a Git repository, branch, and make your first meaningful commits"
+  - "Write and run a script that loads a CSV with pandas and prints a summary"
+  - "Read a traceback calmly and debug with %debug and pdb"
+tags: ["python", "setup", "git", "jupyter", "conda", "uv", "debugging"]
+---
+
+Today is about **removing friction for the next 59 days**. Every minute lost to
+a broken environment or an unreadable traceback is a minute stolen from
+learning. Set things up once, carefully, and let the tools disappear.
+
+## 1. Environment: pick a road and stay on it
+
+Two excellent options. **Conda** if you want one installer that also ships
+scientific binaries; **uv** if you want the fastest, most modern workflow.
+
+**Road A — Miniconda:**
+
+```bash
+conda create -n ds60 python=3.12
+conda activate ds60
+pip install numpy pandas matplotlib scikit-learn jupyterlab
+```
+
+**Road B — uv (fast, project-based):**
+
+```bash
+uv init ds60 && cd ds60
+uv add numpy pandas matplotlib scikit-learn jupyterlab
+uv run jupyter lab
+```
+
+Sanity-check either road before moving on:
+
+```bash
+python -c "import numpy, pandas, sklearn; print(numpy.__version__, pandas.__version__)"
+```
+
+<Callout kind="warn" title="One environment, one purpose">
+  Keep `ds60` clean: install only what a day requires. Dependency sprawl is how
+  environments die silently. If yours breaks beyond repair, delete and recreate
+  — a scripted environment rebuilds in two minutes, which is the whole point of
+  writing the steps down.
+</Callout>
+
+## 2. Jupyter essentials
+
+Launch with `jupyter lab`. Learn these immediately:
+
+- `Shift+Enter` — run cell, advance
+- `A` / `B` — insert cell above / below (command mode)
+- `dd` — delete a cell
+- `Esc` then `M` — turn a cell into markdown (use it for reasoning, not just code)
+- `Tab` — autocomplete; `Shift+Tab` inside parentheses — signature tooltip
+- `df.merge?` — print any object's docstring; `df.merge??` — show its source
+- Kernel menu — **Restart** wipes variables, **Run All Cells** re-executes
+  top to bottom; together they are the "did I imagine that result?" cure
+- `%run day01_toolkit.py` — execute a script from inside the notebook and
+  keep its variables in your session
+
+Magics worth memorizing:
+
+```python
+%timeit sum(range(1000))      # benchmark a single line
+%who                          # list every variable you have defined
+%history                      # replay your session's commands
+%load day01_toolkit.py        # pull a file into the current cell
+```
+
+<Callout kind="tip" title="One kernel, many states of confusion">
+  Cells run in the order *you* ran them, not top to bottom. If results look
+  impossible, use **Restart Kernel and Run All Cells** before you doubt the
+  code. Nine times out of ten it is a stale variable from an abandoned branch
+  of your session.
+</Callout>
+
+## 3. Git, from day one, with habits that scale
+
+```bash
+git init
+git branch -M main
+git add .
+git commit -m "ds60: day 1 — environment and first pandas script"
+```
+
+Habits for the next 60 days:
+
+- **Commit daily**, even mid-learning. "ds60: day 7 — broadcasting drills" is
+  a better portfolio than silence.
+- **Branch when experimenting**: `git switch -c day09-lr-experiments`, merge
+  back when it works, delete the branch after. `main` stays runnable.
+- **Never commit data or outputs**: a `.gitignore` containing `data/`,
+  `.ipynb_checkpoints/` and `__pycache__/` goes in on day one.
+- Write messages as imperative summaries: "add gradient check", not "stuff".
+- Review history often: `git log --oneline` is your learning diary; start a
+  `README.md` today and let it grow one line per day.
+
+Make a GitHub repository today and push. Recruiters read green squares; more
+importantly, your future self reads commit history.
+
+## 4. Debugging: read the report, then interrogate it
+
+When code fails, Python hands you a traceback. Read it **bottom-up**: the last
+line names the error, and the frames above it show exactly where it happened.
+
+Two moves every data scientist needs:
+
+```python
+%xmode verbose    # richer tracebacks in Jupyter (plain / context / verbose)
+
+def mean_squared_error(y, y_hat):
+    import pdb; pdb.set_trace()          # classic breakpoint; pause and inspect
+    return ((y - y_hat) ** 2).mean()
+```
+
+- `%debug` **after** an exception drops you into a post-mortem debugger at the
+  crash site: `u` / `d` move between frames, `p name` prints a variable,
+  `q` quits.
+- `breakpoint()` works anywhere Python 3.7+ runs. Inside it: `l` list code,
+  `n` next line, `s` step into, `c` continue, `q` quit.
+- In Jupyter, `%debug` on a fresh cell does the same post-mortem trick — no
+  `import pdb` needed when the exception is already on the screen.
+
+<Callout kind="tip" title="Print is not a shame">
+  A quick `print(type(x), x.shape, x[:3])` solves half of all debugging.
+  Graduate to `pdb` when prints get tedious, not before.
+</Callout>
+
+## 5. First script: load, inspect, summarize
+
+Create `day01_toolkit.py`:
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data.csv")               # any CSV you have handy
+
+print("shape:", df.shape)                  # (rows, columns)
+print("\ndtypes:\n", df.dtypes)            # what pandas thinks each column is
+print("\nmissing per column:\n",
+      df.isna().sum().sort_values(ascending=False).head())
+print("\nnumeric summary:\n",
+      df.describe().T[["mean", "std", "min", "max"]])
+
+obj_cols = df.select_dtypes("object").columns
+if len(obj_cols):                          # peek at one categorical column
+    print("\ncategory counts:\n", df[obj_cols[0]].value_counts().head())
+
+print(df.head())
+```
+
+Notice the habit forming: **shape, dtypes, missing, summary, peek**. That
+five-beat inspection rhythm is how every dataset of the next 59 days opens.
+
+Close the loop with the one plot that summarizes any numeric column:
+
+```python
+import matplotlib.pyplot as plt
+
+df["some_numeric_column"].hist(bins=30, figsize=(7, 4))
+plt.title("First look")
+plt.show()
+```
+
+Keep this notebook around — a ten-second histogram has killed more wrong
+assumptions than any statistical test you will meet this phase.
+
+<Callout kind="tip" title="Companion dataset">
+  This repository already contains the Financial Stress Prediction dataset under
+  `../data/` — the capstone (Days 55–60) will use it, so feel free to point
+  today's script at it for a first look.
+</Callout>
+
+## Resources
+
+- [Miniconda](https://www.anaconda.com/download) and [uv](https://docs.astral.sh/uv/) — pick your road and bookmark its docs.
+- [Jupyter Lab documentation](https://jupyterlab.readthedocs.io/en/latest/) — skim the interface guide once.
+- [Pro Git, chapters 1–3](https://git-scm.com/book/en/v2) — the only Git reading you need this phase.
+- [10 minutes to pandas](https://pandas.pydata.org/docs/user_guide/10min.html) — tomorrow's warm-up.
+
+## Exercise
+
+1. Point the script at a real CSV (the Financial Stress dataset works). Print
+   missing values per column and the value counts of one categorical column.
+   Write one sentence: what is the unit of observation here?
+2. Deliberately break the script (access a column name that does not exist),
+   run it, read the traceback bottom-up, then run `%debug` and print the
+   offending variable inside the post-mortem before fixing it.
+3. Create the `.gitignore`, commit the working script on a branch
+   (`git switch -c day01-setup`), merge into `main`, and push with a
+   descriptive message.
+
+<Quiz
+  question="Why create a dedicated conda/uv environment for this challenge?"
+  options={["Python runs faster in a virtual environment", "It isolates dependencies so project packages don't conflict with system or other projects", "It's required by Jupyter", "It enables GPU acceleration"]}
+  answer={1}
+  explanation="Environments isolate dependency versions per project — a version conflict in one project can't break another, and 'works on my machine' reproducibility starts here."
+/>

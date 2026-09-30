@@ -1,0 +1,135 @@
+---
+day: 15
+title: "Linear regression, properly"
+phase: 2
+minutes: 90
+objectives:
+  - "Derive the OLS closed form and the gradient-descent update for MSE"
+  - "Rank the regression assumptions by how much they actually matter"
+  - "Read residual plots as assumption diagnostics"
+  - "Interpret R-squared and coefficients without fooling yourself"
+tags: ["linear-regression", "optimization", "sklearn"]
+math:
+  - "optimization/gradient-descent"
+  - "calculus/derivatives-and-gradients"
+---
+
+SQL was plumbing; back to modeling. Linear regression is the first model in
+Phase 2 and still the baseline every fancy model must beat. Refresh
+**[derivatives and gradients](/math/calculus/derivatives-and-gradients)** and
+**[gradient descent](/math/optimization/gradient-descent)** — today you will
+use both on real math, not on reputation.
+
+## The model and the loss
+
+Predict with a weighted sum, measure with squared error:
+
+$$\hat{y}_i = x_i^\top \beta, \qquad L(\beta) = \frac{1}{n} \sum_{i=1}^{n} \left( y_i - x_i^\top \beta \right)^2$$
+
+Squared error is convex in $\beta$ — one basin, no local minima — so "fitting"
+means finding the bottom of a bowl.
+
+## Two routes to the same optimum
+
+Setting the gradient to zero gives the **normal equation**, the closed form:
+
+$$\nabla L(\beta) = \frac{2}{n} X^\top (X\beta - y) = 0 \quad\Longrightarrow\quad \hat{\beta} = \left( X^\top X \right)^{-1} X^\top y$$
+
+Exact, but the matrix inverse costs on the order of feature-count cubed.
+**Gradient descent** walks downhill instead:
+
+$$\beta \leftarrow \beta - \eta \cdot \frac{2}{n} X^\top (X\beta - y)$$
+
+Both arrive at the same place — watch them agree:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(42)
+n, d = 500, 4
+X = np.column_stack([np.ones(n), rng.normal(size=(n, d))])   # intercept column
+beta_true = np.array([1.0, -2.0, 0.5, 3.0, 0.0])
+y = X @ beta_true + rng.normal(scale=0.5, size=n)
+
+beta_ols, *_ = np.linalg.lstsq(X, y, rcond=None)             # closed form
+
+beta_gd = np.zeros(X.shape[1])                               # gradient descent
+for step in range(500):
+    grad = 2 / len(y) * X.T @ (X @ beta_gd - y)
+    beta_gd -= 0.05 * grad
+
+print(np.round(beta_ols, 3))
+print(np.round(beta_gd, 3))
+```
+
+## Assumptions, ranked by how much they matter
+
+1. **Linearity** — the mean of y really is linear in the features. Wrong
+   here, everything downstream is a fitted curve to a curved world. Fix by
+   transforming features (Day 20).
+2. **Exogeneity** — errors are uncorrelated with features. Violated by
+   omitted variables and by leakage; this is what makes coefficients lie.
+3. **Homoscedasticity** — error variance is constant. Violations do not bias
+   predictions but do distort standard errors.
+4. **Normality of residuals** — matters mainly for small-sample inference,
+   least of all the four.
+
+Plot the residuals to audit all of this:
+
+```python
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
+
+model = LinearRegression().fit(X, y)
+resid = y - model.predict(X)
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+axes[0].scatter(model.predict(X), resid, s=8, alpha=0.5)
+axes[0].axhline(0, color="k", lw=1)
+axes[0].set_title("fitted vs residuals")
+axes[1].hist(resid, bins=30)
+axes[1].set_title("residual distribution")
+```
+
+A healthy plot is structureless: centered on zero, constant spread, no
+curvature. A funnel means heteroscedasticity; a curve means nonlinearity.
+
+## Reading the output: R-squared and coefficients
+
+$$R^2 = 1 - \frac{\sum_i (y_i - \hat{y}_i)^2}{\sum_i (y_i - \bar{y})^2}$$
+
+R-squared is the fraction of variance explained — and nothing more. It says
+nothing about whether the model is *useful* at the decision margin, and it
+always rises when you add features (adjusted R-squared exists to punish that).
+
+<Callout kind="deep" title="A coefficient is a ceteris paribus claim">
+  "beta_j is the change in the prediction per unit of feature j, holding all
+  other features fixed." When features are correlated, the data cannot tell
+  which one deserves the credit, so coefficients swing wildly between samples
+  while predictions stay stable. Check collinearity before interpreting any
+  coefficient — predictions and explanations are two different products, and
+  a good predictor does not imply a good story.
+</Callout>
+
+## Resources
+
+- [scikit-learn — linear models user guide](https://scikit-learn.org/stable/modules/linear_model.html)
+- [StatQuest — Linear Regression, Clearly Explained](https://www.youtube.com/watch?v=nk2CQITm_Eo)
+- [3Blue1Brown — Gradient descent, how neural networks learn](https://www.3blue1brown.com/lessons/gradient-descent)
+- [ISLR — free textbook, chapter 3](https://www.statlearning.com/)
+
+## Exercise
+
+1. Fit OLS on the capstone data's numeric features with `np.linalg.lstsq` and
+   with `sklearn.LinearRegression`; confirm the coefficients agree.
+2. Train the same model with pure gradient descent; tune the learning rate
+   until it converges, and plot loss versus step.
+3. Produce the fitted-vs-residual plot on real data and write one sentence
+   naming which assumption worries you most; commit both.
+
+<Quiz
+  question="The residual plot shows a funnel: residuals spread wider as fitted values grow. Which assumption is violated?"
+  options={["Linearity", "Homoscedasticity", "Normality of the features", "Independence of rows"]}
+  answer={1}
+  explanation="Variance that grows with the fitted value is heteroscedasticity. Predictions stay unbiased, but standard errors and inference become unreliable — a log transform of the target is the classic first remedy."
+/>

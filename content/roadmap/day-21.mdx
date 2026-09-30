@@ -1,0 +1,118 @@
+---
+day: 21
+title: "Unsupervised learning: k-means and PCA"
+phase: 2
+minutes: 75
+objectives:
+  - "Trace the k-means loop and its squared-distance objective"
+  - "Choose k with the elbow and silhouette diagnostics"
+  - "Run the standard PCA workflow and read explained variance"
+  - "Decide when unsupervised structure helps a supervised pipeline"
+tags: ["clustering", "pca", "unsupervised"]
+math:
+  - "linear-algebra/eigenvalues-pca"
+---
+
+Every model this phase learned from labels. Today, structure without any —
+clusters and principal components — and three honest ways they earn their
+place in a supervised pipeline. The geometry underneath is the
+**eigendecomposition of a covariance matrix** — vectors that only stretch,
+never rotate.
+
+## k-means in three steps
+
+Initialize k centroids, assign each point to its nearest centroid, move each
+centroid to its cluster's mean — repeat until assignments stop changing. The
+loop is locally minimizing the **inertia**:
+
+$$\min_{C} \sum_{i} \lVert x_i - \mu_{c(i)} \rVert_2^2$$
+
+```python
+from sklearn.cluster import KMeans
+
+km = KMeans(n_clusters=4, n_init=10, random_state=0).fit(Xs)
+labels = km.labels_
+```
+
+`n_init=10` reruns from ten random starts and keeps the best — cheap
+insurance against a bad initialization.
+
+## Choosing k: elbow and silhouette
+
+Inertia always falls as k rises, so its plot only *suggests* an elbow where
+returns diminish. The silhouette scores each point against its own cluster
+versus the nearest other — roughly a shape quality between minus one and one:
+
+$$s(i) = \frac{b(i) - a(i)}{\max\left( a(i),\, b(i) \right)}$$
+
+with $a(i)$ the mean distance to its own cluster and $b(i)$ to the nearest
+other cluster:
+
+```python
+from sklearn.metrics import silhouette_score
+
+for k in range(2, 9):
+    km = KMeans(n_clusters=k, n_init=10, random_state=0).fit(Xs)
+    print(k, round(km.inertia_, 1), round(silhouette_score(Xs, km.labels_), 3))
+```
+
+## PCA: rotate, then truncate
+
+On standardized data, PCA finds the orthogonal directions of maximal
+variance — the eigenvectors of the covariance matrix, ordered by eigenvalue:
+
+$$\Sigma v_j = \lambda_j v_j$$
+
+Keep the top components and you keep most of the information in far fewer
+dimensions; `inverse_transform` reconstructs a denoised approximation:
+
+```python
+from sklearn.decomposition import PCA
+
+evr = PCA().fit(Xs).explained_variance_ratio_
+cumulative = np.cumsum(evr)
+n95 = int(np.argmax(cumulative >= 0.95)) + 1
+print(n95, "components explain 95% of variance")
+plt.plot(range(1, len(cumulative) + 1), cumulative, marker="o")
+```
+
+## When unsupervised earns its keep
+
+Three honest uses: **segments** — cluster labels become a categorical feature
+or a business lens; **compression** — a PCA front-end can denoise and speed
+up linear models; **anomalies** — points with large reconstruction error or
+far from every centroid are worth a human look. None of these replaces the
+supervised pipeline; each feeds it.
+
+<Callout kind="deep" title="Scale is destiny in unsupervised learning">
+  k-means minimizes Euclidean distances and PCA maximizes Euclidean variance,
+  so a feature measured in tens of thousands dominates both regardless of its
+  relevance — age in years barely exists. Standardize first, then interpret
+  components against the *scaled* units, and remember both are linear
+  methods: two Gaussians on a ring will outwit k-means no matter how you
+  scale them.
+</Callout>
+
+## Resources
+
+- [scikit-learn — clustering guide](https://scikit-learn.org/stable/modules/clustering.html)
+- [scikit-learn — PCA and decomposition](https://scikit-learn.org/stable/modules/decomposition.html#pca)
+- [StatQuest — PCA, Step-by-Step](https://www.youtube.com/watch?v=FgakZw6K1QQ)
+- [StatQuest — K-means clustering](https://www.youtube.com/watch?v=4b5d3muPQmA)
+
+## Exercise
+
+1. Standardize the capstone numerics; run k-means for k from 2 to 8; plot
+   inertia and silhouette side by side; pick a k and defend it in one
+   sentence.
+2. Fit PCA and report how many components explain 95 percent of variance;
+   plot the cumulative curve.
+3. Add cluster labels as a categorical feature and re-run the Day 19
+   pipeline; did PR-AUC move? Commit with the comparison.
+
+<Quiz
+  question="k-means on raw data clusters almost entirely on income (tens of thousands) and ignores age (tens). Why?"
+  options={["Income simply has more predictive power", "Euclidean distance is scale-dominated: income's spread dwarfs age's", "k-means prefers right-skewed features", "Age is treated as a categorical column"]}
+  answer={1}
+  explanation="Inertia sums squared Euclidean distances, so the widest-scale feature contributes almost all of it. Standardize before any distance-based or variance-based method — k-means and PCA alike."
+/>

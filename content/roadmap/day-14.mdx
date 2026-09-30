@@ -1,0 +1,136 @@
+---
+day: 14
+title: "SQL for data scientists"
+phase: 2
+minutes: 90
+objectives:
+  - "Write SELECT queries with WHERE, GROUP BY and HAVING in execution order"
+  - "Join tables safely and reach for ROW_NUMBER and LAG when needed"
+  - "Translate fluently between SQL and pandas idioms"
+  - "Query a DataFrame through sqlite3 in under ten lines"
+tags: ["sql", "sqlite", "pandas"]
+---
+
+Your EDA yesterday lived in a notebook; the data you will meet in industry
+lives in a warehouse. SQL is not a side skill — it is how data scientists
+fetch their own data, and the mental model maps almost one-to-one onto pandas.
+
+## Write it in execution order
+
+The clauses are *written* in one order and *executed* in another:
+FROM, then WHERE, then GROUP BY, then HAVING, then SELECT, then ORDER BY.
+That single fact explains the two classic beginner errors — you cannot filter
+on a SELECT alias in WHERE (it does not exist yet), and HAVING exists precisely
+because WHERE runs before aggregation:
+
+```sql
+SELECT region,
+       COUNT(*)    AS n,
+       AVG(income) AS avg_income
+FROM households
+WHERE employment_type <> 'retired'   -- filters rows, before grouping
+GROUP BY region
+HAVING COUNT(*) >= 50                -- filters groups, after aggregation
+ORDER BY avg_income DESC;
+```
+
+## JOINs — and the duplicate-key trap
+
+```sql
+SELECT h.*, r.unemployment_rate
+FROM households h
+LEFT JOIN region_stats r
+       ON r.region = h.region;
+```
+
+`INNER JOIN` keeps matches only; `LEFT JOIN` keeps every left row and fills
+misses with NULL. The trap: if the right table's key is not unique, each match
+multiplies the left rows and your downstream counts silently explode. In
+pandas the same query — and the same trap — looks like
+`df.merge(r, on="region", how="left", validate="many_to_one")`, where
+`validate` turns the explosion into an error.
+
+## Window functions: aggregate without collapsing rows
+
+`OVER (PARTITION BY ... ORDER BY ...)` computes per-group statistics while
+keeping every row — the SQL shape of the groupby-shift you will need for time
+features on Day 20:
+
+```sql
+WITH ranked AS (
+  SELECT household_id, month, stress_level,
+         ROW_NUMBER() OVER (PARTITION BY household_id
+                            ORDER BY month DESC) AS recency,
+         LAG(stress_level)  OVER (PARTITION BY household_id
+                                  ORDER BY month)      AS prev_stress
+  FROM households
+)
+SELECT household_id, month, stress_level, prev_stress
+FROM ranked
+WHERE recency = 1;   -- each household's most recent row, plus its history
+```
+
+pandas equivalents: `LAG` is
+`df.sort_values("month").groupby("household_id")["stress_level"].shift(1)`;
+latest-per-group is `df.sort_values("month").groupby("household_id").tail(1)`.
+
+## The pandas ↔ SQL mental map
+
+| SQL | pandas |
+| --- | --- |
+| `SELECT a, b FROM t` | `df[["a", "b"]]` |
+| `WHERE a > 10` | `df.query("a > 10")` |
+| `GROUP BY g` plus `AVG(x)` | `df.groupby("g")["x"].mean()` |
+| `HAVING COUNT(*) > 50` | `df.groupby("g").filter(lambda d: len(d) > 50)` |
+| `LEFT JOIN ... ON k` | `df.merge(other, on="k", how="left")` |
+| `LAG(x) OVER (PARTITION BY p ...)` | `df.groupby("p")["x"].shift(1)` |
+| `DISTINCT` | `df.drop_duplicates()` |
+| `CASE WHEN` | `pd.cut` or `np.select` |
+
+And you can run real SQL against a DataFrame in memory:
+
+```python
+import sqlite3
+import pandas as pd
+
+con = sqlite3.connect(":memory:")
+df.to_sql("households", con, index=False, if_exists="replace")
+
+top = pd.read_sql(
+    "SELECT region, AVG(income) AS avg_income FROM households "
+    "GROUP BY region HAVING COUNT(*) >= 50 ORDER BY avg_income DESC",
+    con,
+)
+```
+
+<Callout kind="tip" title="Most broken aggregates are one of two bugs">
+  When a GROUP BY result looks wrong, check first that the join key you added
+  was unique (row explosion), then that every filter landed in the right
+  clause (WHERE for rows, HAVING for groups). Dialect differences between
+  SQLite, Postgres and BigQuery are real but minor; these two bugs are
+  universal.
+</Callout>
+
+## Resources
+
+- [SQLBolt — interactive SQL lessons](https://sqlbolt.com)
+- [pandas — comparison with SQL](https://pandas.pydata.org/docs/user_guide/compare_with_sql.html)
+- [SQLite — window functions reference](https://www.sqlite.org/windowfunctions.html)
+- [Mode — SQL tutorial](https://mode.com/sql-tutorial/)
+
+## Exercise
+
+1. Load the capstone dataset into an in-memory SQLite database and write a
+   query for average debt-to-income by region, restricted to regions with at
+   least 100 rows.
+2. Write a CTE with `ROW_NUMBER` that fetches each household's most recent
+   record; verify the output has exactly one row per household.
+3. Rewrite the same window query in pandas (sort, groupby, shift or tail) and
+   confirm both results match; commit with both snippets.
+
+<Quiz
+  question="Your GROUP BY count comes out larger than the table's row count. Most likely cause?"
+  options={["The WHERE clause was too permissive", "A join key added before aggregating had duplicates, exploding rows", "HAVING ran before GROUP BY", "NULL values are being counted twice"]}
+  answer={1}
+  explanation="A non-unique join key produces many-to-many row multiplication, and the aggregate then counts ghosts. Check uniqueness of the right-hand key (or use validate='many_to_one' in pandas) before trusting any post-join aggregate."
+/>

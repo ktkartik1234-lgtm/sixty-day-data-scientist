@@ -1,0 +1,217 @@
+---
+day: 11
+title: "pandas deep dive: loading, indexing and reshaping"
+phase: 2
+minutes: 90
+objectives:
+  - "Master loc/iloc, boolean masking and MultiIndex selection"
+  - "Know when pandas gives you a view versus a copy — and why it matters"
+  - "Reshape with melt, pivot, groupby and merge in a readable chained style"
+  - "Profile a real dataset's structure and missingness without fear"
+tags: ["pandas", "data-wrangling", "phase-2"]
+---
+
+Phase 2 begins: twelve days of turning messy data into model-ready matrices,
+ending in classical ML on the Financial Stress dataset. Phase 1 gave you the
+tools; today starts the craft. We go deep on the three pandas skills you will
+touch every single day from here on: selecting, reshaping, and writing
+transformations a human can still read a month later.
+
+## Indexing that scales
+
+`loc` selects by label, `iloc` by position, `query` by string. All three
+compose with boolean masks, and `isin` handles membership tests:
+
+```python
+df.loc[df["income"] > 50_000, ["age", "stress_level"]]   # label-based
+df.iloc[:10, -3:]                                        # position-based
+df.query("age < 40 and savings_ratio > 0.1")             # readable filtering
+mask = df["stress_level"].isin([4, 5])                   # membership
+df.loc[mask, "stress_band"] = "high"                     # assign in one call
+```
+
+<Callout kind="warn" title="Chained indexing burns people">
+  `df[df.a > 0]["b"] = 1` may silently not write through: the first bracket can
+  return a copy, so you mutate a throwaway object and the original never
+  changes. Use `df.loc[mask, "b"] = 1` — one call, unambiguous, safe.
+</Callout>
+
+## MultiIndex: hierarchy without spreadsheets
+
+Hand the index two keys and you get a MultiIndex — a table with frozen row
+headers. It is how pandas represents panel data (many households, many months
+each), which is exactly the shape of longitudinal financial data:
+
+```python
+panel = df.set_index(["household_id", "month"]).sort_index()
+
+panel.loc[(17, slice("2024-01", "2024-03")), :]   # one household, a date range
+panel.xs("2024-06", level="month")                # every household, one month
+wide = panel.unstack("month")                     # months become columns
+long_again = wide.stack("month")                  # and back — lossless roundtrip
+```
+
+Three rules worth memorizing:
+
+- `xs` pulls a single level's value out; `pd.IndexSlice` (as in
+  `df.loc[pd.IndexSlice[:, "2024-06"], :]`) handles mixed picks across levels.
+- Sorting the index is not cosmetic: slicing an unsorted MultiIndex with
+  `loc` is slow, and ranged slices can raise.
+- `groupby(["a", "b"])` hands you a MultiIndex back; call `.reset_index()`
+  when you want plain columns again — usually right before plotting or merging.
+
+## Views versus copies
+
+This is the bug that costs beginners a weekend, so meet it on purpose:
+
+```python
+subset = df[df["region"] == "north"]             # quietly returns a copy
+subset["income"] = 0                             # SettingWithCopyWarning:
+                                                 # writes into the copy only
+df.loc[df["region"] == "north", "income"] = 0    # one call, writes through
+
+snapshot = df.copy()                             # deliberate independence
+```
+
+<Callout kind="deep" title="Why pandas cannot just always hand you a view">
+  A true view exists only when the selection maps to a contiguous slice of
+  memory. A boolean mask grabs scattered rows, so pandas must copy — and
+  chained indexing hides which of the two you are holding. That is why
+  `df[df.a > 0]["b"] = 1` works on some days and silently does nothing on
+  others. One `loc` call removes the ambiguity: pandas knows exactly what
+  you mean.
+</Callout>
+
+## Method chaining: a house style
+
+From today on, write transformations top to bottom like a recipe — filter,
+derive, aggregate, rank — instead of a dozen mutating statements. `.assign`
+derives columns with lambdas that see the frame *being built*; `.pipe` slots
+any external function into the chain (`df.pipe(f, x)` is just `f(df, x)`):
+
+```python
+def winsorize(s: pd.Series, p: float = 0.01) -> pd.Series:
+    lo, hi = s.quantile([p, 1 - p])
+    return s.clip(lo, hi)
+
+clean = (
+    df
+    .query("age >= 18")
+    .assign(
+        income_clean=lambda d: d["income"].pipe(winsorize, 0.02),
+        savings_ratio=lambda d: d["savings"] / d["income_clean"],
+    )
+    .groupby("region", as_index=False)["savings_ratio"].mean()
+    .rename(columns={"savings_ratio": "avg_savings_ratio"})
+    .sort_values("avg_savings_ratio", ascending=False)
+    .reset_index(drop=True)
+)
+```
+
+House rules that keep chains honest:
+
+- One operation per line; the `(` at the end of a line lets Python continue.
+- Reference the in-progress frame with `lambda d: ...` — never the old `df`.
+- Anything that does not fit a method call becomes a small named function
+  used through `.pipe`; your pipeline becomes importable and testable.
+- If a chain exceeds what fits on one screen, split it into two named steps.
+
+## Reshaping: long is the truth, wide is the presentation
+
+Tidy data keeps one observation per row; presentations want one subject per
+row. `melt` and `pivot` move between the two and are exact inverses. Note that
+`pivot` raises on duplicate keys while `pivot_table` aggregates them — the
+latter is usually what you wanted anyway:
+
+```python
+long = df.melt(id_vars="country", var_name="year", value_name="gdp")
+wide = long.pivot(index="country", columns="year", values="gdp")
+
+summary = df.groupby("segment").agg(
+    n=("id", "count"), avg_income=("income", "mean")
+)
+matrix = df.pivot_table(
+    index="region", columns="segment", values="stress_level", aggfunc="mean"
+)
+ct = pd.crosstab(df["region"], df["segment"], normalize="index")
+
+merged = summary.merge(
+    df[["segment", "region"]].drop_duplicates(),
+    on="segment", how="left", validate="one_to_many",
+)
+```
+
+`merge` semantics: `how="inner"` keeps matches only; `how="left"` keeps every
+left row and fills the misses with NaN. Pass `validate="..."` whenever you can
+state the expected key relationship — it turns silent join explosions into
+loud errors. `pd.concat` stacks frames along an axis; check
+`ignore_index=True` and the resulting duplicate indices when it misbehaves.
+
+## The profiling ritual, scripted
+
+For any new dataset (today: the Financial Stress data in `../data/`), run the
+same four steps in the same order, every time:
+
+1. `df.shape`, `df.dtypes` — shape and types first
+2. `df.isna().mean()` — missingness ranked
+3. `df.describe(include="all")` — distributions, cardinality of categoricals
+4. `df.target.value_counts(normalize=True)` — class balance **before** anything else
+
+Script it once and you will actually do it:
+
+```python
+def profile(df: pd.DataFrame) -> pd.DataFrame:
+    """One small frame that describes the frame you actually care about."""
+    nums = df.describe().T[["mean", "std", "min", "max"]]
+    return (
+        pd.DataFrame({
+            "dtype": df.dtypes.astype(str),
+            "pct_missing": df.isna().mean().round(3),
+            "n_unique": df.nunique(),
+        })
+        .join(nums)
+        .sort_values("pct_missing", ascending=False)
+    )
+
+raw = pd.read_csv("../data/financial_stress.csv")
+print(raw.shape, raw["target"].value_counts(normalize=True).to_dict())
+report = profile(raw)
+print(report.head(12))
+print("duplicate rows:", raw.duplicated().sum())
+```
+
+<Callout kind="tip" title="Speed notes you will need by day 20">
+  `apply` row-wise and `iterrows` are the slow paths; prefer vectorized
+  operations on whole columns. Converting repeated strings to `category`
+  dtype cuts memory several-fold and speeds up `groupby`. And when a
+  transformation looks like a loop, there is almost always a column-wise
+  expression that does the same thing in one pass.
+</Callout>
+
+## Resources
+
+- [pandas user guide — indexing and selecting data](https://pandas.pydata.org/docs/user_guide/indexing.html)
+- [pandas user guide — reshaping and pivoting](https://pandas.pydata.org/docs/user_guide/reshaping.html)
+- [pandas user guide — merging, joining, concatenating](https://pandas.pydata.org/docs/user_guide/merging.html)
+- [McKinney — Python for Data Analysis (free online)](https://wesmckinney.com/book/)
+
+## Exercise
+
+Take the capstone dataset and:
+
+1. Build a MultiIndex panel keyed by household and month; pull one household's
+   full history with `.xs` (or `loc` on the sorted index), then `unstack` it
+   wide and `stack` it back — confirm the roundtrip is lossless.
+2. Write one chained pipeline (filter, derive a ratio, winsorize income via
+   `.pipe`, group, rank) that produces average stress level by income bracket,
+   as a single readable cell.
+3. Extend `profile()` with a flag for object-dtype columns whose values turn
+   numeric under `pd.to_numeric(errors="coerce")`, and a duplicate-row count.
+   Commit with a message a stranger could follow.
+
+<Quiz
+  question="df.isna().mean() returns what?"
+  options={["The mean of non-missing values", "The fraction of missing values per column", "The number of rows with any missing value", "An error unless dropna() is called first"]}
+  answer={1}
+  explanation="isna() produces a boolean frame; its column-wise mean is the missing fraction per column — the fastest first look at data quality, and the second step of every profiling ritual."
+/>

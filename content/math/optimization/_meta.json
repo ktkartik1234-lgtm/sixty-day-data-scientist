@@ -1,0 +1,4 @@
+{
+  "name": "Optimization",
+  "description": "Gradient descent and the geometry of loss landscapes — how training actually converges."
+}

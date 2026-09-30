@@ -1,0 +1,127 @@
+---
+day: 40
+title: "Fine-tuning with LoRA and PEFT"
+phase: 4
+minutes: 90
+objectives:
+  - "Explain why full fine-tuning is a memory problem, not just a compute one"
+  - "Derive the LoRA low-rank update and its parameter savings"
+  - "Choose rank, alpha and target modules from the task, not from folklore"
+  - "Adapt a pretrained model with a PEFT sketch"
+tags: ["llm", "lora", "peft", "fine-tuning", "genai"]
+papers:
+  - "lora"
+---
+
+Yesterday's ladder ended at fine-tuning; today you learn the version that
+actually fits on consumer hardware. LoRA is why adapting an 8B model is a
+single-GPU afternoon instead of a cluster contract.
+
+## Why full fine-tuning is expensive to *train*, not to run
+
+In mixed-precision training every parameter drags four tensors behind it:
+an fp16 weight, an fp16 gradient, and fp32 master weight plus two fp32 Adam
+moments. That is roughly 16 bytes per parameter:
+
+$$M \approx 16 \cdot N_{params} \text{ bytes}$$
+
+A 7B model wants about 112 GB before activations — and every task gets its
+own full copy. The insight of the LoRA paper: fine-tuning updates are
+*intrinsically low-rank*, so you can learn a small correction instead of
+rewriting all weights.
+
+## The LoRA update
+
+Freeze the pretrained weight $$W_0 \in \mathbb{R}^{d \times k}$$ and learn
+the update as a product of two thin matrices:
+
+$$W' = W_0 + \Delta W = W_0 + B A, \qquad A \in \mathbb{R}^{r \times k}, \; B \in \mathbb{R}^{d \times r}, \; r \ll \min(d, k)$$
+
+Initialize $A$ with Gaussian noise and $B$ with zeros, so the model starts
+exactly at $W_0$; scale the update by $\alpha / r$. Gradients flow only
+through $A$ and $B$. Day 2 told you an outer product is a rank-1 matrix —
+LoRA simply stacks $r$ of them.
+
+## The memory math
+
+Per adapted layer, trainable parameters drop from $$d \cdot k$$ to
+$$r \cdot (d + k)$$:
+
+```python
+d = k = 4096
+for r in (4, 8, 16, 64):
+    full = d * k
+    lora = r * (d + k)
+    print(f"r={r}: {lora:,} vs {full:,} trainable -> {full / lora:.0f}x fewer")
+```
+
+At r=8 that is roughly 256x fewer parameters in the layer; across a 7B model
+the trainable share falls well under 1 percent, the optimizer states shrink
+with them, and a checkpoint becomes a few megabytes you can email.
+
+## Rank and placement choices
+
+- **Rank $r$**: 4–8 for style and format tasks; 16–64 for genuine skill
+  shifts. Measure — the quality curve usually saturates early, and doubling
+  $r$ quadruples adapter parameters.
+- **Alpha**: commonly $\alpha = r$ or $2r$; the effective update step scales
+  with $\alpha / r$, so alpha is your gain knob when changing rank.
+- **Placement**: attention projections first (q, v, then k, o), MLPs if the
+  task still underfits. More modules, more capacity, more memory.
+- **Learning rate**: higher than full fine-tuning (around 1e-4) because so
+  few parameters are moving.
+
+## A PEFT sketch
+
+```python
+from peft import LoraConfig, get_peft_model, TaskType
+from transformers import AutoModelForCausalLM
+
+base = AutoModelForCausalLM.from_pretrained("your-favorite-8B-model")
+config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=8, lora_alpha=16, lora_dropout=0.05,
+    target_modules=["q_proj", "v_proj"],   # start small; add modules if underfit
+)
+model = get_peft_model(base, config)
+model.print_trainable_parameters()
+# trainable params: ~7M || all params: ~8B || trainable%: ~0.09
+
+# ... a standard Trainer loop over 200-1,000 curated examples (Day 41 evals it) ...
+# model.save_pretrained("adapters/support-tone/")   # ~30 MB, not 16 GB
+```
+
+This is a sketch — the PEFT docs quickstart is the runnable version.
+
+<Callout kind="deep" title="Adapters are swappable; the base is not">
+  Because the base model is frozen, one deployment can serve many LoRAs —
+  support-tone, sql-writer, legal-summarizer — hot-loaded per request. And
+  for a single task you can merge: $$W' = W_0 + BA$$ folds into the weights,
+  adding zero inference latency. One base, many behaviors: that is the
+  deployment trick LoRA quietly enabled.
+</Callout>
+
+## Resources
+
+- [LoRA paper (Hu et al., 2021)](https://arxiv.org/abs/2106.09685) — read sections 3 and 4; the rest is the experiments you now have notation for.
+- [Hugging Face PEFT docs](https://huggingface.co/docs/peft) — the quickstart to run for real.
+- [QLoRA paper](https://arxiv.org/abs/2305.14314) — LoRA on top of a 4-bit quantized base: fine-tuning a 65B model on one GPU.
+
+## Exercise
+
+1. Compute the trainable-parameter table for a 4096 x 11008 MLP layer at
+   r in 4, 8, 16, 64. State the reduction factor at r=8 in your notebook.
+2. Choose target modules and rank for two tasks — (a) enforcing a strict
+   JSON output format, (b) absorbing a niche professional dialect — and
+   justify why (a) wants a smaller r than (b).
+3. If you have any GPU or a Colab: run the PEFT quickstart on a 0.5B model
+   with 100 examples and record the trainable percentage and checkpoint
+   size. If not: write out the full 16-bytes-per-parameter memory math for a
+   7B model, with and without LoRA, and commit the calculation.
+
+<Quiz
+  question="In LoRA, why is B initialized to zeros?"
+  options={["To make the checkpoint smaller at load time", "So training starts exactly at the pretrained weights, with no random perturbation", "Because zero gradients converge faster", "It is a convention inherited from dropout"]}
+  answer={1}
+  explanation="With B = 0 the update BA contributes nothing at step 0, so the adapted model is exactly the base model until gradients flow — a clean, safe starting point."
+/>

@@ -1,0 +1,114 @@
+---
+day: 43
+title: "Diffusion models: how image generation works"
+phase: 4
+minutes: 90
+objectives:
+  - "Derive the forward noising process and its closed form at any timestep"
+  - "State the training objective: predict the noise that was added"
+  - "Explain sampling, text conditioning and classifier-free guidance"
+  - "Explain why latent diffusion made consumer-GPU generation possible"
+tags: ["diffusion", "generative", "genai"]
+papers:
+  - "diffusion-ddpm"
+---
+
+Yesterday the models learned to see; today they learn to paint. Diffusion
+generates by destroying images and learning to undo the destruction — the
+same recipe now powers audio, video and molecule design.
+
+## Forward process: noise on a schedule
+
+Corrupt data one small Gaussian step at a time:
+
+$$q(x_t \mid x_{t-1}) = \mathcal{N}\left(x_t;\ \sqrt{1 - \beta_t}\, x_{t-1},\ \beta_t \mathbf{I}\right)$$
+
+The schedule's Gaussian steps compose into a closed form — you can jump to
+any timestep $t$ directly from $x_0$, without walking the chain:
+
+$$x_t = \sqrt{\bar{\alpha}_t}\, x_0 + \sqrt{1 - \bar{\alpha}_t}\, \epsilon, \qquad \epsilon \sim \mathcal{N}(0, \mathbf{I}), \quad \bar{\alpha}_t = \prod_{s=1}^{t} (1 - \beta_s)$$
+
+```python
+import numpy as np
+
+x0 = np.random.randn(28, 28)                 # pretend this is an image
+T = 1000
+betas = np.linspace(1e-4, 0.02, T)           # noise schedule
+alpha_bar = np.cumprod(1 - betas)            # signal energy remaining
+
+def q_sample(x0, t, eps=None):
+    eps = np.random.randn(*x0.shape) if eps is None else eps
+    return np.sqrt(alpha_bar[t]) * x0 + np.sqrt(1 - alpha_bar[t]) * eps, eps
+
+for t in (10, 100, 999):
+    print(f"t={t}: signal fraction {alpha_bar[t]:.4f}")
+```
+
+By $t = T$ the signal fraction is effectively zero: pure noise.
+
+## Reverse process: a network that predicts the noise
+
+Training is plain regression. Draw a sample, corrupt it at a random $t$, and
+teach a U-Net to name the exact noise that was added:
+
+$$\mathcal{L}_{simple} = \mathbb{E}_{x_0, t, \epsilon} \left\lVert \epsilon - \epsilon_\theta(x_t, t) \right\rVert^2$$
+
+Sampling reverses the corruption: start from pure noise and repeatedly
+subtract the predicted noise, step by step, for $T$ steps. Smarter samplers
+such as DDIM cut that to 20–50 steps with little quality loss.
+
+## Text conditioning and guidance
+
+Text enters through cross-attention: the denoiser attends to text embeddings
+at every layer, so each denoising step is steered by the prompt.
+Classifier-free guidance sharpens the steer — train with the caption dropped
+10–20 percent of the time, then at sampling time extrapolate *away from* the
+unconditional prediction:
+
+$$\tilde{\epsilon} = \epsilon_\theta(x_t, \emptyset) + w \left( \epsilon_\theta(x_t, c) - \epsilon_\theta(x_t, \emptyset) \right)$$
+
+A guidance weight $w$ above 1 trades output diversity for prompt fidelity —
+the dial behind "creative" versus "literal" image generation.
+
+## Latent diffusion: the speed trick
+
+Pixels are enormous: a 512 x 512 x 3 image is over 780,000 numbers. The
+latent diffusion insight is to run the whole diffusion process in the
+compressed latent space of a pretrained VAE — 64 x 64 x 4 — roughly 48x
+fewer numbers per step — and decode back to pixels only at the end. That is
+the Stable Diffusion paper's trick, and it is why generation moved from
+clusters to gaming GPUs.
+
+<Callout kind="deep" title="One idea, every modality">
+  The DDPM recipe is modality-agnostic: corrupt with a schedule, train a
+  network to predict the corruption, sample by reversing. Waveforms, protein
+  structures, video frames — only the denoiser architecture and the schedule
+  change. When the next generative modality appears, look for the diffusion
+  under it.
+</Callout>
+
+## Resources
+
+- [DDPM paper (Ho et al., 2020)](https://arxiv.org/abs/2006.11239) — the forward/reverse formulation above.
+- [The Annotated Diffusion Model](https://huggingface.co/blog/annotated-diffusion) — every equation, implemented line by line.
+- [Lilian Weng: What are Diffusion Models?](https://lilianweng.github.io/posts/2021-07-11-diffusion-models/) — the standard mathematical survey.
+- [Latent diffusion paper](https://arxiv.org/abs/2112.10752) — the speed trick that became Stable Diffusion.
+
+## Exercise
+
+1. Implement `q_sample` for a 28 x 28 array and print the signal fraction
+   (alpha_bar) at t = 1, 100, 500, 999. Confirm the image is near-pure noise
+   by the end of the schedule.
+2. Write the sampling loop skeleton that starts at pure noise and subtracts
+   predicted noise per step, using a zero-predictor as the stand-in network.
+   Explain in one sentence why the result stays noise-shaped.
+3. Compute the compression: how many numbers live in 512 x 512 x 3 pixels
+   versus 64 x 64 x 4 latents? State the reduction factor and what it does
+   to per-step cost, then commit the calculation.
+
+<Quiz
+  question="What does the diffusion network actually predict during training?"
+  options={["The final clean image directly at every step", "The category label of the image", "The noise that was added to the corrupted input", "The next token in a sequence"]}
+  answer={2}
+  explanation="The simple DDPM objective regresses the epsilon that was mixed in at a random timestep — equivalently a denoising direction — which makes the loss a stable MSE and sampling a guided reverse walk."
+/>

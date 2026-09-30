@@ -1,0 +1,111 @@
+---
+day: 41
+title: "Evaluating LLMs: benchmarks and LLM-as-judge"
+phase: 4
+minutes: 90
+objectives:
+  - "Build a locked, held-out eval set from real usage, not imagination"
+  - "Grade with rubrics and quantify judge-human agreement"
+  - "Use LLM-as-judge while correcting its documented biases"
+  - "Track pass rate over time so regressions are caught, not felt"
+tags: ["llm", "evaluation", "llm-as-judge", "genai"]
+---
+
+You can now build GenAI systems; today you learn to *prove* they work.
+Without an eval, every prompt tweak is vibes; with one, you have an
+engineering discipline — and your LoRA from yesterday is only as good as the
+eval that scores it.
+
+## Your own held-out set beats public benchmarks
+
+Collect 50–200 real inputs from actual usage — the questions users typed,
+the tickets that arrived — plus expected behavior for each. Split them: a
+dev set you iterate against freely, and an eval set you *only report on*.
+The moment you tune prompts against the eval set, it becomes a dev set.
+Public benchmarks (MMLU and friends) rank models on other people's tasks;
+they say almost nothing about yours.
+
+## Rubric-based grading
+
+Decide what "good" means before you look at outputs:
+
+```python
+RUBRIC = {
+    "grounded": "Every factual claim cites a retrieved source or is common knowledge.",
+    "correct":  "The answer matches the gold answer or is an acceptable paraphrase.",
+    "concise":  "Under 120 words; no preamble, no repetition.",
+}
+SCALE = {"good": 1.0, "borderline": 0.5, "bad": 0.0}
+```
+
+Hand-score a sample first — you cannot specify a criterion you have not
+seen violated. Then have a second grader rate the same 20 items; if you two
+disagree, the rubric is the bug, not the graders.
+
+## LLM-as-judge: scale with known biases
+
+A strong model grades thousands of outputs for the price of a few hundred
+human labels — but it carries documented biases:
+
+- **Position bias** — prefers the first (or last) answer in pairwise
+  comparison. Fix: present both orders and require agreement.
+- **Verbosity bias** — longer answers win, quality be damned. Fix: normalize
+  lengths, or make brevity an explicit rubric line.
+- **Self-preference** — judges rate outputs in their own stylistic family
+  higher. Fix: use a judge from a different model family than the generator.
+
+```python
+def judge_pair(judge, question, a, b, criteria) -> str:
+    """Return 'a', 'b' or 'tie'; count only order-consistent verdicts."""
+    v1 = judge(question, [a, b], criteria)   # a first
+    v2 = judge(question, [b, a], criteria)   # positions swapped
+    return v1 if v1 == v2 else "tie"
+```
+
+Ties from position flips are not wasted compute — they are honest
+measurements of how noisy the judge is.
+
+## Humans in the loop, regressions on the dashboard
+
+Hand-label 20 random judge decisions each week and measure agreement with
+Cohen's kappa — agreement beyond chance:
+
+$$\kappa = \frac{p_o - p_e}{1 - p_e}$$
+
+where $p_o$ is observed agreement and $p_e$ the agreement expected by
+coincidence. A kappa below roughly 0.6 means the judge needs recalibration
+before its scores mean anything. Then wire the eval into your workflow: run
+it in CI on every prompt, model and config change. A pull request without an
+eval number is not a reviewable change.
+
+<Callout kind="warn" title="Optimizing against your own judge is a mirror">
+  When the same model family writes and grades the outputs, gains can be the
+  judge rating its own dialect more kindly. Keep a small human-verified set
+  sacred and check it whenever judge scores jump. If the judge score rises
+  while the human score does not, you found a bias — not a win.
+</Callout>
+
+## Resources
+
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685) — the paper that catalogued the judge biases above.
+- [HELM](https://crfm.stanford.edu/helm/) — Stanford's holistic evaluation framework; a model for multi-metric reporting.
+- [OpenAI Evals](https://github.com/openai/evals) — a framework for evals as code, close to what you will build.
+- [Hugging Face Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard) — public benchmarks, useful for ranking candidates before your own eval.
+
+## Exercise
+
+1. Build a 30-example eval set for your day-45 bot: question, gold chunk,
+   gold answer. Write the three-criterion rubric and freeze half of it as
+   the locked eval.
+2. Run a strong model as pairwise judge on 10 output pairs, both orders.
+   Report the flip rate; treat any flip as a tie in the final tally.
+3. Hand-grade 20 outputs and compute raw agreement and kappa with the judge.
+   Then add one regression test to the eval — a prompt change that
+   previously broke something, now caught automatically.
+
+<Quiz
+  question="An LLM judge consistently favors the second answer shown in pairwise comparisons. Standard fix?"
+  options={["Use a smaller judge model to reduce bias", "Swap presentation order and require both passes to agree", "Raise the judge's temperature for diversity", "Only judge long answers, where differences are clearer"]}
+  answer={1}
+  explanation="Position bias is systematic, so it cancels under order swapping: a verdict counts only when it survives both presentations. Flips become ties rather than noise."
+/>

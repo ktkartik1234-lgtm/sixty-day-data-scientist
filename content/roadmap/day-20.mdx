@@ -1,0 +1,124 @@
+---
+day: 20
+title: "Feature engineering and the leakage hunt"
+phase: 2
+minutes: 90
+objectives:
+  - "Scale features where it matters and encode categoricals safely"
+  - "Explain why target encoding leaks unless computed fold-wise"
+  - "Engineer domain ratios, interactions and time-lagged features"
+  - "Run a leakage checklist over every column before trusting a score"
+tags: ["feature-engineering", "leakage", "sklearn"]
+blog:
+  - "case-study-financial-stress"
+---
+
+Day 19 made evaluation honest; today makes the model smarter. Features are
+where domain knowledge enters the pipeline, and — as the Financial Stress
+case study shows — where the most dangerous errors hide. Scaling,
+encoding, ratios, lags: every one is a chance to help the model or to leak
+the answer to it.
+
+## Scaling: which models care
+
+Distance and gradient-based models (linear, KNN, PCA, neural nets) need
+comparable scales; tree-based models are invariant to monotone transforms.
+`StandardScaler` for roughly symmetric data, `RobustScaler` when outliers
+survived Day 12. Route different columns differently with a `ColumnTransformer`:
+
+```python
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+
+num = ["age", "income", "debt_to_income"]
+cat = ["region", "employment_type"]
+
+pre = ColumnTransformer([
+    ("num", StandardScaler(), num),
+    ("cat", OneHotEncoder(handle_unknown="ignore", min_frequency=10), cat),
+])
+```
+
+## One-hot vs ordinal
+
+One-hot encode nominal categories (region, employment type); reserve ordinal
+encoding for genuinely ordered ones (stress band low to high) or the model
+will invent distances that do not exist. `handle_unknown="ignore"` keeps
+tomorrow's new category from crashing the pipeline; `min_frequency` buckets
+rare levels instead of exploding the width. For very high cardinality
+(thousands of levels), one-hot becomes unwieldy — which brings us to:
+
+## Target encoding: powerful, dangerous
+
+Replace a category with the mean of the target for that category. Done
+naively — on all rows — the feature *is* the target in disguise. Done
+honestly, the mapping comes from training folds only, with smoothing so rare
+categories do not memorize noise:
+
+```python
+def target_encode(tr_key, tr_target, new_key, m=50):
+    """Fit on training rows; apply anywhere. m = smoothing strength."""
+    prior = tr_target.mean()
+    stats = tr_target.groupby(tr_key).agg(["mean", "count"])
+    smooth = (stats["mean"] * stats["count"] + prior * m) / (stats["count"] + m)
+    return new_key.map(smooth).fillna(prior)
+```
+
+<Callout kind="warn" title="Target leakage: the score you cannot trust">
+  If a feature would not exist at prediction time, or quietly encodes the
+  outcome — a target-encoded column computed on all rows, a balance recorded
+  after the default date, any post-2019 field in a 2019 prediction task —
+  your offline score is fiction. The tell is a feature whose correlation with
+  the target is implausibly high and a metric that jumps the moment it lands.
+  Hunt leakage before you hunt accuracy: one leaked column beats every
+  hyperparameter you will ever tune.
+</Callout>
+
+## Interactions, ratios and time
+
+Domain ratios beat raw magnitudes: `debt_to_income` says more than either
+column alone. Interactions let linear models bend. Time features must look
+*backwards only* — shift before rolling, so the current row's value never
+contributes to its own feature:
+
+```python
+df["debt_to_income"] = df["debt"] / df["income"].clip(lower=1)
+df["income_x_unemp"] = df["income"] * df["unemployment_rate"]
+
+g = df.groupby("household_id")
+df["late_payments_lag1"] = g["late_payments"].shift(1)
+df["income_rolling_3m"] = (
+    g["income"].transform(lambda s: s.shift(1).rolling(3, min_periods=1).mean())
+)
+```
+
+The checklist, per column, before any result is believed:
+
+- Would this feature exist at prediction time?
+- Was it computed or fitted on training rows only?
+- Is it a proxy for the outcome — post-outcome administrative data?
+- For time data, does every aggregate use only the past?
+
+## Resources
+
+- [scikit-learn — preprocessing guide](https://scikit-learn.org/stable/modules/preprocessing.html)
+- [scikit-learn — ColumnTransformer](https://scikit-learn.org/stable/modules/compose.html#column-transformer)
+- [Kaggle Learn — Feature Engineering](https://www.kaggle.com/learn/feature-engineering)
+- [category_encoders — target and other encoders](https://contrib.scikit-learn.org/category_encoders/)
+
+## Exercise
+
+1. Build a ColumnTransformer for the capstone data (scale numerics, one-hot
+   categoricals with `handle_unknown="ignore"`) and score it inside a
+   Day 19 pipeline with stratified CV.
+2. Add two domain ratios and one interaction; report whether test PR-AUC
+   improves, and by how much.
+3. Run the four-point leakage checklist against every column; remove or
+   defend each suspect in writing; commit the audit with the results.
+
+<Quiz
+  question="One feature correlates 0.98 with the target and your metric jumps to AUC 0.99 the moment you add it. First move?"
+  options={["Celebrate and submit", "Check when that feature becomes available relative to the label — prime leakage suspect", "Add more features on top of it", "Lower the learning rate and retrain"]}
+  answer={1}
+  explanation="Real features rarely correlate that strongly with a noisy outcome. An implausibly powerful column is usually reading the answer key — check its availability window before trusting any number the model produces."
+/>

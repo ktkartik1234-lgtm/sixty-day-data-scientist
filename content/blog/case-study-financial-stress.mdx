@@ -1,0 +1,53 @@
+---
+title: "Case study: the Financial Stress Prediction challenge"
+description: "How the capstone project works end to end — from a tabular dataset to a deployed model, using the companion notebook in this repository."
+date: "2026-09-29"
+tags: ["capstone", "tabular", "case-study"]
+---
+
+This site lives next to a real machine-learning project: the **Financial Stress
+Prediction challenge**, with a full pipeline notebook (`financial_stress_pipeline.ipynb`)
+in the repository root. During Phase 6 we turn that project into your capstone.
+
+## Why a tabular case study first
+
+LLMs get the headlines, but most industry data science is tabular: loans,
+churn, claims, risk. The capstone exercises the *whole* pipeline:
+
+1. **Framing** — turning "predict financial stress" into a supervised problem
+   with a leakage-safe target and metric.
+2. **EDA** — distributions, missingness, target leakage suspects.
+3. **Feature engineering** — ratios, binned income bands, one-hot vs ordinal
+   encoding.
+4. **Modeling** — logistic regression baseline → gradient boosting
+   (see [XGBoost: A Scalable Tree Boosting System](/papers)).
+5. **Evaluation** — stratified cross-validation, ROC-AUC vs PR-AUC on an
+   imbalanced target, calibration.
+
+<Callout kind="deep" title="Leakage is the story">
+  The most instructive part of a stress-prediction dataset is how easily
+  *outcome-adjacent* columns sneak into training. The capstone day walks through
+  hunting them down — it's the skill interviewers probe hardest.
+</Callout>
+
+## What "done" looks like
+
+By Day 60 you'll have:
+
+- a clean, reproducible notebook (and a refactored Python package),
+- a model card documenting intended use and failure modes,
+- a deployed demo you can link on your CV,
+- and this write-up as the first serious entry in your portfolio blog.
+
+The math you'll lean on: logistic regression's log-odds form,
+
+$$\log \frac{p(y=1 \mid x)}{1 - p(y=1 \mid x)} = w^\top x + b,$$
+
+covered in the probability track, and the evaluation theory from Days 20–21.
+
+<Quiz
+  question="Why is ROC-AUC potentially misleading on a heavily imbalanced target?"
+  options={["It can't be computed for imbalanced data", "The large negative class makes even a poor classifier look strong", "It penalizes false positives too much", "It only works for regression"]}
+  answer={1}
+  explanation="With very few positives, the false-positive rate stays tiny even for many mistakes, inflating AUC. Precision–Recall AUC is the better lens for imbalanced classification."
+/>

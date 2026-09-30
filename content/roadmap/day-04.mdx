@@ -1,0 +1,106 @@
+---
+day: 4
+title: "Derivatives, partials and the gradient"
+phase: 1
+minutes: 75
+objectives:
+  - "Read the derivative as a sensitivity, not a slope on a graph"
+  - "Compute partial derivatives and assemble them into the gradient"
+  - "Verify any gradient numerically with finite differences"
+tags: ["math", "calculus", "numpy"]
+math:
+  - "calculus/derivatives-and-gradients"
+  - "calculus/partial-derivatives"
+---
+
+Yesterday you saw what linear maps do globally. The derivative is the same
+idea **locally**: the best linear approximation of a function around a point.
+Today you build the object — the gradient — that will drive all of training.
+
+## The derivative as sensitivity
+
+$$f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}$$
+
+Skip the limit and the reading stays practical: $f'(x)$ answers **"if I nudge
+$x$ up a tiny bit, roughly how much does $f$ move, and in which direction?"**
+When $f$ is a loss and $x$ is a model parameter, that question *is* machine
+learning.
+
+## Partials: one knob at a time
+
+Real models have thousands of knobs. A **partial derivative**
+$\frac{\partial f}{\partial w_i}$ wiggles one knob $w_i$ while freezing the
+rest. Stack all of them into one vector — the **gradient**:
+
+$$\nabla f(\mathbf{w}) = \begin{pmatrix} \frac{\partial f}{\partial w_1} \\ \vdots \\ \frac{\partial f}{\partial w_n} \end{pmatrix}$$
+
+The gradient points in the direction of **steepest ascent**. Its negative
+points downhill — remember that for Day 9, when it becomes the update rule.
+
+## Gradient check with finite differences
+
+You never have to trust your calculus. Perturb each input slightly and
+measure:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+X = rng.normal(size=(50, 3))
+y = X @ np.array([2.0, -1.0, 0.5]) + rng.normal(scale=0.1, size=50)
+
+def loss(w):
+    r = X @ w - y
+    return np.mean(r ** 2)
+
+def analytic_grad(w):                    # what calculus (and backprop) gives
+    return 2 * X.T @ (X @ w - y) / len(y)
+
+def numeric_grad(f, w, eps=1e-6):        # what measurement gives
+    g = np.zeros_like(w)
+    for i in range(len(w)):
+        e = np.zeros_like(w)
+        e[i] = eps
+        g[i] = (f(w + e) - f(w - e)) / (2 * eps)   # central difference
+    return g
+
+w = rng.normal(size=3)
+print(np.allclose(analytic_grad(w), numeric_grad(loss, w), atol=1e-5))  # True
+```
+
+Agreement means your formula is right. Disagreement means a bug — this exact
+check is a standard unit test inside every deep learning framework.
+
+<Callout kind="deep" title="Slow but honest">
+  Finite differences cost one function evaluation per parameter — hopeless for
+  training a million-parameter model, but perfect for verifying a gradient
+  formula. The central difference above has error of order $\varepsilon^2$,
+  which is why `eps=1e-6` lands near machine precision. Backpropagation is
+  just the chain rule applied efficiently so you never need the numeric
+  version at scale.
+</Callout>
+
+## Resources
+
+- [3Blue1Brown — Essence of Calculus](https://www.3blue1brown.com/topics/calculus), chapters 1–3 — derivatives as local linear approximations.
+- [Khan Academy — Multivariable calculus](https://www.khanacademy.org/math/multivariable-calculus) — partials and the gradient with visuals.
+- [MIT OCW 18.02SC](https://ocw.mit.edu/courses/18-02sc-multivariable-calculus-fall-2010/) — the reference treatment of gradients.
+
+## Exercise
+
+1. Add ridge regularization to the loss:
+   `L(w) = loss(w) + lam * w @ w` with `lam = 0.1`. Derive the new analytic
+   gradient by hand (the derivative of a sum is the sum of the derivatives),
+   implement it, and confirm `numeric_grad` agrees.
+2. Run the check at five different random `w` vectors and report the largest
+   absolute difference you see.
+3. Minimize the original `loss` by taking 1000 steps of size 0.1 against the
+   analytic gradient from a zero start; compare the result with
+   `np.linalg.lstsq(X, y, rcond=None)[0]`. Commit the notebook.
+
+<Quiz
+  question="Why use a central difference — f(w+e) minus f(w-e), over 2e — instead of the forward difference f(w+e) minus f(w), over e?"
+  options={["It needs fewer evaluations of the loss", "Its truncation error is of order e squared instead of order e", "It avoids floating-point rounding entirely", "It also works for non-differentiable functions"]}
+  answer={1}
+  explanation="The forward difference carries an error term proportional to eps; averaging both sides cancels the first-order term, leaving error proportional to eps squared — far more accurate for the same eps."
+/>

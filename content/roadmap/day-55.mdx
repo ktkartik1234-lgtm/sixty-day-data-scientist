@@ -1,0 +1,224 @@
+---
+day: 55
+title: "Capstone kickoff: framing the Financial Stress Prediction problem"
+phase: 6
+minutes: 90
+objectives:
+  - "Turn the raw dataset into a well-posed supervised learning problem"
+  - "Define the target and write a metric justification a stakeholder could audit"
+  - "Run a leakage audit with concrete checks before writing any model code"
+  - "Set up the capstone repository and freeze the test set"
+tags: ["capstone", "tabular", "project", "leakage"]
+blog:
+  - "case-study-financial-stress"
+---
+
+Six days, one end-to-end project. Yesterday you built the alarms that keep a
+model honest in production; today you start building the model those alarms
+deserve. Everything from Days 1–54 converges here, and the raw material is
+already on disk: the **Financial Stress Prediction challenge** in `../data/`
+(`Train.csv`, `Test.csv`, `data_dictionary.csv`), with a reference pipeline in
+`financial_stress_pipeline.ipynb`.
+
+Before any code, hold this thought: projects are won or lost in their first
+hour. The hour spent framing today buys back ten hours of confusion later.
+
+## 1. Stakeholder questions first, models second
+
+Modeling is the easy part; deciding *what to model and why* is the job. Before
+touching the data, role-play the person who will consume the prediction —
+say, a collections or financial-wellness team lead — and write down what they
+would ask before believing any model:
+
+1. **What is one row?** One customer? One customer-month? One application?
+2. **What decision changes when the model fires?** An outreach call, an
+   overdraft offer, a payment reminder?
+3. **What does a miss cost versus a false alarm?** Money, trust, or both?
+4. **What would the model have to look like for you to *not* deploy it?**
+5. **What data will exist at prediction time** — really, at the moment of the
+   decision, not later in the analytics warehouse?
+
+Every item on the framing checklist below is one of these five questions
+wearing a technical costume. Answer the questions in prose first; the
+checklist then fills itself in.
+
+## 2. The framing checklist, deepened
+
+### Unit of analysis
+
+Open `Train.csv`: each row is one customer snapshot with an `ID`, six months
+of mobile-money history (`m1` most recent through `m6` oldest), and profile
+fields like `arpu`, `age`, `gender`, `region`, `segment` and
+`earning_pattern`. So the unit of analysis is **one customer at one snapshot
+in time**. Verify that rather than assuming it:
+
+```python
+import pandas as pd
+
+df = pd.read_csv("../data/Train.csv")
+print("rows:", len(df), "| unique IDs:", df["ID"].nunique())
+print(df["liquidity_stress_next_30d"].value_counts(normalize=True))
+```
+
+If IDs ever repeated, you would need group-aware splitting so the same
+customer never appears on both sides of the split — a decision that must be
+made *now*, not after modeling.
+
+### Target definition
+
+Write the target in one sentence, in words, before touching encodings:
+
+> Given the six months of mobile-money history up to day 0, predict whether
+> the customer experiences liquidity stress in the following 30 days.
+
+That sentence earns three checks. **Temporal alignment** — every feature must
+come from the window *before* day 0; the `m1`–`m6` panels do, but any column
+whose window overlaps the outcome window is disqualified. **Encoding** — the
+target ships as a clean binary `liquidity_stress_next_30d` in 0 and 1.
+**Base rate** — roughly 15 percent of customers are positive, so the trivial
+baseline is strong:
+
+$$\text{accuracy}(\text{always predict "no stress"}) = 1 - \pi \approx 0.85$$
+
+An 85 percent accuracy for doing nothing is the number your model must beat —
+and the reason accuracy will not be your headline metric.
+
+### Metric selection, with a justification template
+
+Fill in this template and paste it into the README — it is the paragraph an
+interviewer will probe hardest:
+
+> Because only about 15 percent of customers experience stress, and a missed
+> stressed customer costs far more than one unnecessary outreach, the
+> headline metric is **PR-AUC** (average precision), with **ROC-AUC** as a
+> secondary ranking metric and **Brier score** for calibration. The operating
+> threshold is a business decision, chosen from a cost matrix on validation
+> data (Day 58), never left at the default 0.5.
+
+Notice what the template forces you to admit: a metric encodes a *value
+judgment* about which errors hurt. Say it out loud, in the README, or the
+choice looks arbitrary.
+
+### Split: freeze the test set today
+
+Stratified train/validation/test (60/20/20 is fine at 40,000 rows), one fixed
+seed, test set written to disk and **not opened again until Day 58**.
+Freezing early is what makes your final number believable — the moment a test
+set has influenced any decision, it is a second validation set.
+
+## 3. The leakage audit, with concrete financial examples
+
+In financial datasets, outcome-adjacent columns are everywhere — anything
+recorded *because* stress occurred. Four species to hunt, with examples from
+lending and from this dataset:
+
+- **Target leakage** — a column recorded after the outcome. Classic loan
+  examples: `collection_call_count`, `default_flag`, `days_to_repayment`.
+  Here the equivalent would be anything measured inside the *outcome* window;
+  the defense is the temporal-alignment check above, applied column by
+  column against the data dictionary.
+- **Group leakage** — the same entity on both sides of the split. One
+  customer's near-duplicate rows landing in train and test inflates every
+  metric. Handled by the ID uniqueness check; with multiple snapshots per
+  customer you would split by customer, never by row.
+- **Preprocessing leakage** — a scaler, imputer or encoder fit on the full
+  dataset before splitting, so validation rows informed the transformation.
+  Day 57's `Pipeline` makes this mistake structurally impossible.
+- **Aggregation leakage** — features computed over rows that include the
+  target, for example a per-segment stress *rate* computed on all of train.
+  Aggregates are computed on training folds only.
+
+The cheapest detector is a **single-feature AUC scan**: any one feature that
+predicts the target almost perfectly is not a discovery, it is a suspect.
+
+```python
+from sklearn.metrics import roc_auc_score
+
+target = "liquidity_stress_next_30d"
+numeric = [c for c in df.select_dtypes("number").columns if c != target]
+suspects = []
+for col in numeric:
+    x = df[col].fillna(df[col].median())
+    auc = roc_auc_score(df[target], x)
+    if abs(auc - 0.5) > 0.45:                 # suspiciously separative
+        suspects.append((col, round(auc, 3)))
+print("leakage suspects:", suspects)
+```
+
+A genuinely informative feature scores 0.6–0.7 on its own. A feature scoring
+0.95 is either the outcome wearing a disguise or a near-copy of the target —
+in both cases it comes out, and the removal is *documented* in the audit
+notebook.
+
+A second concrete check is temporal: mark every column's measurement window
+against the 30-day outcome window, once, in writing. The notebook cell that
+records the decision can be as plain as this:
+
+```python
+# every m1–m6 panel must end before the outcome window opens
+panel_cols = [c for c in df.columns if c.startswith("m") and c[1].isdigit()]
+print("panel columns:", len(panel_cols), "| target:", target)
+print("features cover months -6..0; outcome covers days 0..30")
+```
+
+Record the verdict per feature group next to it — future you will not
+remember why `x_90_d_activity_rate` was allowed to stay, and an interviewer
+will ask.
+
+<Callout kind="warn" title="The leakage audit comes first">
+  In financial datasets, outcome-adjacent columns are everywhere — anything
+  recorded *because* stress occurred. Hunt them now, not after a suspiciously
+  perfect AUC. This is the single most instructive part of the capstone: the
+  habit of asking "could I know this at prediction time?" transfers to every
+  dataset you will ever touch.
+</Callout>
+
+## 4. Repository shape, and why each folder exists
+
+```
+capstone/
+├── data/            # raw + processed; git-ignored, row counts noted in README
+├── src/             # importable package: features.py, train.py, evaluate.py
+├── notebooks/       # exploration only — logic graduates to src/ or dies
+├── models/          # serialized artifacts + MODEL_CARD.md
+├── tests/           # smoke tests for features and (later) the API
+└── README.md        # problem statement, metric justification, results table
+```
+
+The rationale is a boundary: **notebooks are drafts, `src/` is law.** Anything
+a future run depends on — the target definition, panel feature builders, the
+cross-validation harness — lives in `src/`, where imports and tests can reach
+it; notebooks remain where thinking happens. `data/` is git-ignored (tens of
+megabytes, reproducible from source); commit the exact file names, row counts
+and split seed instead, so a stranger can rebuild your setup. `models/` will
+carry the serialized pipeline plus the model card you write on Day 59 — an
+artifact without documentation is a liability, not an asset.
+
+And the `README.md` is not documentation of last resort: it is the
+**contract** for Days 56–60. Write it first, code against it second.
+
+## Resources
+
+- [Kaggle — Data Leakage](https://www.kaggle.com/alexisbcook/data-leakage) — a short, canonical tutorial to calibrate your paranoia.
+- [Google — Rules of Machine Learning](https://developers.google.com/machine-learning/guides/rules-of-ml) — read the rules on the first model and on leakage.
+- [scikit-learn — model evaluation](https://scikit-learn.org/stable/modules/model_evaluation.html) — the metric glossary you will live in this week.
+
+## Exercise
+
+1. **Stakeholder-questions-first.** Write the five stakeholder questions and
+   answer each in one or two sentences inside the README's problem statement
+   (200 words or fewer in total). That document is your Day 56–60 contract.
+2. Run the ID-uniqueness check and the single-feature AUC scan. Record every
+   suspect, its AUC, and its verdict (keep, drop, investigate) in
+   `notebooks/01_leakage_audit.ipynb`. Freeze the stratified test set with a
+   fixed seed and record the row counts and seed in the README.
+3. Scaffold the repository tree above, add the `.gitignore` (ignore `data/`,
+   `models/*.joblib`, `.ipynb_checkpoints/`), and make the first commit:
+   `ds60: day 55 — capstone framing, leakage audit, frozen test set`.
+
+<Quiz
+  question="A stress-prediction model trains on a column recorded by the bank AFTER a stress event was flagged. This is…"
+  options={["A useful engineered feature", "Target leakage — it must be excluded or time-shifted", "Fine as long as accuracy is high", "Only a problem for deep learning"]}
+  answer={1}
+  explanation="Features unavailable at prediction time leak outcome information. The model will look brilliant offline and fail in production — the classic, expensive capstone lesson."
+/>

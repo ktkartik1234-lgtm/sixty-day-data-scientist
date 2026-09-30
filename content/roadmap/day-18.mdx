@@ -1,0 +1,115 @@
+---
+day: 18
+title: "Gradient boosting and XGBoost"
+phase: 2
+minutes: 90
+objectives:
+  - "Explain boosting as sequential residual fitting and gradient descent in function space"
+  - "Manage the learning_rate versus n_estimators trade-off"
+  - "Train XGBoost with early stopping and the key regularization hyperparameters"
+tags: ["boosting", "xgboost", "ensembles"]
+papers:
+  - "xgboost"
+---
+
+Yesterday's forest built its trees in parallel, each blind to the others.
+Boosting is the opposite temperament: one small learner at a time, each
+trained to fix what the ensemble before it still gets wrong. On tabular data
+this is the strongest classical model you will meet — and [the XGBoost
+paper](/papers) explains why.
+
+## Boosting vs bagging
+
+Bagging attacks **variance**: many overgrown, decorrelated trees, averaged.
+Boosting attacks **bias**: many deliberately weak trees (depth 3 to 6),
+added sequentially, each one trained on the current ensemble's mistakes.
+The price is that boosting cannot be parallelized across rounds and *can*
+overfit if you keep adding trees — bagging barely can.
+
+## Fitting the residuals
+
+Start with the best constant prediction, then add small corrections. For
+squared error loss, the negative gradient of the loss is exactly the
+residual, so each round fits a small tree to what is still unexplained:
+
+$$F_0(x) = \bar{y}, \qquad F_m(x) = F_{m-1}(x) + \nu \, h_m(x)$$
+
+where $h_m$ is a shallow tree fit to $y - F_{m-1}$ and $\nu$ is the
+learning rate. Gradient boosting is gradient descent — but each step *is* a
+function, fit rather than computed:
+
+```python
+from sklearn.tree import DecisionTreeRegressor
+
+F = np.full(len(y), y.mean())            # F0: the best constant
+lr = 0.3
+for m in range(200):
+    resid = y - F
+    h = DecisionTreeRegressor(max_depth=3).fit(X, resid)
+    F += lr * h.predict(X)               # additive correction
+```
+
+Twenty lines, and it already rivals much fancier models on the toy problem.
+
+## learning_rate and n_estimators: one dial, two ends
+
+Shrink $\nu$ and each round moves less, so you need more rounds — but the
+final fit is smoother and usually generalizes better. Rules of thumb:
+$\nu$ between 0.01 and 0.3, enough rounds, and let the data decide when to
+stop rather than guessing the count.
+
+## XGBoost: second-order steps and built-in regularization
+
+XGBoost approximates the loss with a **second-order** Taylor expansion
+(gradient *and* Hessian per example), and charges a complexity price for
+every leaf inside the split-gain formula. The result is the strongest
+out-of-the-box tabular learner, controlled by a short list of knobs:
+
+```python
+from xgboost import XGBClassifier
+
+model = XGBClassifier(
+    n_estimators=2000, learning_rate=0.05, max_depth=4,
+    subsample=0.8, colsample_bytree=0.8,     # stochastic boosting
+    reg_lambda=1.0, min_child_weight=1,
+    eval_metric="aucpr", early_stopping_rounds=50,
+)
+model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+print(model.best_iteration)                  # the round that won
+```
+
+`subsample` and `colsample_bytree` borrow yesterday's decorrelation trick;
+`reg_lambda` and `min_child_weight` prune; early stopping ends training when
+the validation metric stops improving — the honest way to pick the round count.
+
+<Callout kind="deep" title="The paper's real idea is regularization, not speed">
+  Everyone remembers XGBoost for being fast. The durable insight is that each
+  split must buy its complexity: the gain formula subtracts a penalty
+  proportional to the number of leaves and the sum of their weights, using
+  curvature (the Hessian) to decide. Boosting with a built-in complexity tax
+  is why depth-4 boosted trees beat depth-20 forests so often on tabular data.
+</Callout>
+
+## Resources
+
+- [XGBoost — parameter tuning guide](https://xgboost.readthedocs.io/en/stable/tutorials/param_tuning.html)
+- [Chen and Guestrin — XGBoost (arXiv)](https://arxiv.org/abs/1603.02754)
+- [StatQuest — XGBoost Part 1](https://www.youtube.com/watch?v=OtD8wVaFm6E)
+- [scikit-learn — gradient boosting guide](https://scikit-learn.org/stable/modules/ensemble.html#gradient-boosted-trees)
+
+## Exercise
+
+1. Run your hand-rolled residual booster with learning rates 0.05, 0.3 and
+   1.0; plot test error against round count for each.
+2. Train XGBClassifier (or `HistGradientBoostingClassifier` if xgboost is
+   unavailable) with early stopping at two learning rates; record
+   `best_iteration` for both.
+3. Coarsely tune max_depth, min_child_weight and subsample; report test
+   PR-AUC before and after; commit with the winning configuration.
+
+<Quiz
+  question="Halving learning_rate from 0.2 to 0.1 with early stopping active usually means:"
+  options={["Fewer trees are needed", "Roughly twice as many rounds before stopping, often a slightly better validation score", "The model overfits immediately", "The loss becomes non-differentiable"]}
+  answer={1}
+  explanation="Smaller steps mean more rounds for the same total movement — the classic trade-off. The upside is a smoother fit that often generalizes a little better, which is why production models pair small learning rates with early stopping."
+/>

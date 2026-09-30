@@ -1,0 +1,204 @@
+---
+day: 35
+title: "Prompt engineering that actually works"
+phase: 4
+minutes: 75
+objectives:
+  - "Apply the core prompting patterns: few-shot, chain-of-thought, role and structure prompting"
+  - "Understand in-context learning and why it works"
+  - "Build a reusable prompt template with evaluation criteria"
+tags: ["llm", "prompting", "genai"]
+papers:
+  - "language-models-are-few-shot-learners"
+blog:
+  - "hello-60-days"
+---
+
+Phase 4 begins. Today is deliberately hands-on with no training loop: the
+prompt **is** the model interface. You met the transformer's machinery in
+Phase 3; the next twelve days teach you to drive it, and the first control
+surface is text itself.
+
+## The four workhorse patterns
+
+1. **Few-shot** — show 2–5 input/output examples before the real input
+   (GPT-3 formalized this: the prompt is the program).
+2. **Chain-of-thought** — "think step by step" measurably improves arithmetic
+   and multi-step reasoning; you're trading tokens for computation.
+3. **Role/structure** — fix the persona and the output schema
+   ("You are a…; return JSON with keys…").
+4. **Delimiters & grounding** — separate instructions from data with clear
+   markers; instruct the model to answer only from provided context (the
+   seed of RAG on Day 38).
+
+<Callout kind="deep" title="Why does few-shot work?">
+  At sufficient scale, autoregressive models implement an implicit learning
+  algorithm over the context window. The examples condition the distribution so
+  the continuation completes the pattern. You met the mechanism — attention —
+  on Days 33–34; the [Attention Is All You Need](/papers) lineage runs straight
+  into this paper.
+</Callout>
+
+## Build: a prompt template you can test
+
+```python
+TEMPLATE = """You are a careful data analyst.
+Classify the support ticket into exactly one of: {labels}.
+
+Examples:
+{examples}
+
+Ticket: {ticket}
+Return JSON: {{"label": "...", "confidence": 0-1}}
+"""
+```
+
+## Temperature and top_p: the dials behind every output
+
+Every token is drawn from a probability distribution over the vocabulary.
+Sampling controls reshape that distribution — they change *which* plausible
+output you get, never what the model knows:
+
+$$P(x_i \mid \text{context}) = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}$$
+
+- **Temperature $T$**: as $T \to 0$ the softmax approaches argmax (greedy,
+  near-deterministic decoding); as $T$ rises, probability mass flattens and
+  rare tokens surface.
+- **top_p (nucleus)**: keep the smallest token set whose cumulative
+  probability reaches $p$, renormalize, then sample — a per-step adaptive
+  cutoff. Tune temperature *or* top_p, rarely both.
+- **max_tokens / stop sequences**: bound the output. Truncation at
+  max_tokens is a silent failure mode — always check the finish reason.
+
+```python
+import numpy as np
+
+logits = np.array([4.0, 3.0, 2.0, 1.0])
+
+def softmax(z, T=1.0):
+    z = z / T
+    e = np.exp(z - z.max())
+    return e / e.sum()
+
+for T in (0.5, 1.0, 2.0):
+    print(f"T={T}:", np.round(softmax(logits, T), 3))
+# T=0.5: [0.868 0.117 0.014 0.002]   confident, repetitive
+# T=1.0: [0.644 0.237 0.087 0.032]   the model's honest opinion
+# T=2.0: [0.436 0.288 0.19  0.126]   inventive, error-prone
+```
+
+Rule of thumb: extraction, classification and code want low temperature;
+brainstorming and prose want more. When reliability matters, temperature is
+the first dial to turn — before reaching for a different model.
+
+## Why prompts fail: ambiguity vs capability
+
+When output is wrong, diagnose before rewriting. Most "model failures" are
+one of four fixable things:
+
+- **Ambiguity** — the instruction has two reasonable readings. Test: could a
+  careful human intern complete it without asking a question? Fix: tighten
+  wording, add an example, define the output contract.
+- **Capability** — the task exceeds the model. Test: does it fail across
+  three different phrasings at temperature 0? Fix: decompose into steps, add
+  retrieval, or escalate models — not more exclamation marks.
+- **Sampling variance** — the prompt is fine; one unlucky draw ruined the
+  demo. Fix: lower temperature, or sample several answers and take the
+  majority (self-consistency).
+- **Context problems** — instruction buried under data, delimiters missing,
+  window overflowed. Fix: instructions first, data delimited, compress.
+
+```python
+def stability_check(prompt_fn, n=5):
+    """Cheap differential diagnosis: variance or capability?"""
+    outputs = {prompt_fn() for _ in range(n)}
+    if len(outputs) > 1:
+        print(f"{len(outputs)} distinct outputs -> sampling variance")
+    else:
+        print("same wrong answer every time -> ambiguity or capability")
+```
+
+## A second worked example: extraction
+
+Classification assigns a label; extraction pulls structure out of messy
+text. Same skeleton, a stricter contract:
+
+```python
+import json
+
+EXTRACT_TEMPLATE = """You are a precise data-entry assistant.
+Extract fields from the message below into JSON.
+
+Fields:
+- customer_name: string or null
+- product: one of "laptop", "phone", "tablet", "other"
+- complaint: one sentence in your own words, or null
+
+Rules:
+- If a field is not mentioned, use null. Never invent values.
+- Return JSON only, no commentary.
+
+Message:
+\"\"\"{message}\"\"\"
+"""
+
+def extract_fields(message: str, call_llm) -> dict:
+    raw = call_llm(EXTRACT_TEMPLATE.format(message=message), temperature=0)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"error": "unparseable", "raw": raw}
+    expected = {"customer_name", "product", "complaint"}
+    return parsed if set(parsed) == expected else {"error": "schema", "raw": raw}
+```
+
+Two habits transfer straight from tabular ML: validate the schema before
+trusting the content, and treat null as signal — a model that invents a
+product name is worse than one that admits the field is missing.
+
+## Anti-patterns: what experienced prompters never do
+
+- **Vague verbs**: "analyze this" buys an essay. "Return a JSON array of at
+  most 5 bullets, each under 15 words" buys an artifact.
+- **Multi-task prompts**: classify AND summarize AND translate in one call;
+  each task degrades the others. Chain separate calls instead.
+- **Burying the instruction**: the task appears after three paragraphs of
+  context. Instructions first, data delimited, recap at the end if long.
+- **Only negatives**: "don't be verbose, don't use jargon" says what to
+  avoid, not what to produce. Describe the wanted output positively.
+- **Polishing on three examples**: a prompt tuned until 3 cherry-picked
+  cases pass is overfit. Hold out test cases like any other model.
+- **Begging**: "this is very important for my career" does not move a
+  probability distribution. Precision moves it; pleading does not.
+
+## Resources
+
+- [Language Models are Few-Shot Learners](https://arxiv.org/abs/2005.14165) — the GPT-3 paper behind in-context learning; read the few-shot evaluation sections.
+- [OpenAI prompt engineering guide](https://platform.openai.com/docs/guides/prompt-engineering) — six strategies with examples.
+- [Anthropic prompt engineering docs](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview) — clear, largely model-agnostic techniques.
+
+## Exercise
+
+1. Take 20 real support tickets (or generate them). Baseline: zero-shot at
+   temperature 0. Treatment: 4-shot + structured output. Measure accuracy on
+   10 held-out tickets. The delta *is* the lesson — write it down.
+2. Run the treatment 5 times at temperature 0.7 and count distinct outputs
+   with `stability_check`; then rerun at temperature 0. Classify your worst
+   case as ambiguity, capability or variance, and apply the matching fix.
+3. Build the extraction prompt for 10 messy messages (names, dates, amounts);
+   require null for anything absent. Score schema validity and field accuracy
+   separately, then commit the notebook with a one-paragraph findings note.
+
+<Quiz
+  question="Your zero-shot classifier prompt mislabels rarely-seen categories. Cheapest first fix?"
+  options={["Fine-tune the model on 10k examples", "Add a few labeled examples to the prompt (few-shot)", "Increase model temperature", "Switch to a larger context window"]}
+  answer={1}
+  explanation="Few-shot examples condition the model on the task at hand with zero training cost — the standard first escalation before any fine-tuning."
+/>
+
+<Quiz
+  question="The same prompt returns different answers across 5 runs at temperature 0.7. Most likely diagnosis?"
+  options={["The model lacks the capability for the task", "Sampling variance — lower the temperature or use self-consistency", "The context window is too small", "The prompt is ambiguous"]}
+  answer={1}
+  explanation="Distinct outputs on identical input point to sampling variance. Ambiguity or capability shows up as consistently wrong answers — test at temperature 0 to separate the modes."
+/>

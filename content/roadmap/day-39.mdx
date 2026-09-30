@@ -1,0 +1,109 @@
+---
+day: 39
+title: "Prompting vs fine-tuning: choosing the right tool"
+phase: 4
+minutes: 75
+objectives:
+  - "Decide between prompting, RAG, long context and fine-tuning with a framework"
+  - "Compare approaches on data needs, freshness, cost and latency"
+  - "Follow an escalation ladder instead of jumping to expensive options"
+tags: ["llm", "fine-tuning", "rag", "decision-making", "genai"]
+---
+
+Days 35–38 handed you four tools; tomorrow adds the fifth. Today is the
+engineer's discipline between them: choosing the *cheapest* tool that passes
+a held-out evaluation, and knowing when escalation is justified.
+
+## Four questions that decide the tool
+
+1. **Knowledge or behavior?** Facts that change — policies, products,
+   documents — belong in retrieval. Style, format and skill live in weights:
+   a prompt can teach them, a fine-tune bakes them in.
+2. **How much labeled data?** Zero to ten examples: few-shot. Fifty to a
+   thousand: LoRA territory. Five thousand plus: full fine-tuning, and
+   usually just more prompting anyway.
+3. **How much drift?** If the task definition shifts weekly, prompt and RAG
+   changes deploy instantly; a fine-tune needs a retraining pipeline.
+4. **What is the cost profile?** One-off build effort versus per-call spend.
+   At a million calls a day, shaving 1,000 input tokens per call is real
+   money; at a hundred calls a day it is noise.
+
+## The comparison table
+
+| Approach | Data needed | Fresh knowledge | Inference cost | Latency | Wins when |
+| --- | --- | --- | --- | --- | --- |
+| Zero/few-shot prompt | 0–10 examples | Only via context | Baseline | Baseline | Task is close to pretraining; you iterate fast |
+| RAG | Corpus + eval set | Excellent — re-index anytime | Retrieval + inflated input tokens | + retrieval step | Answers must cite current, private facts |
+| Long context | Dump docs in the window | Good, per call | High — pay every call | Prefill grows linearly | One-off deep reads; no index worth maintaining |
+| LoRA fine-tune | 50–1,000 curated examples | None — frozen at training time | Same as base model | Same as base | Stable format/skill task at high call volume |
+
+## The escalation ladder
+
+Never skip rungs — each one costs roughly an order of magnitude more effort:
+
+1. Zero-shot with a crisp output contract
+2. Few-shot with 5 diverse examples
+3. Structured output with a repair loop (Day 36)
+4. RAG for knowledge (Day 38)
+5. Long context for one-off heavy reads
+6. LoRA on 50+ curated examples (Day 40)
+7. Full fine-tuning — rarely justified
+
+Escalate only when a held-out eval says the current rung failed, never
+because a demo "felt off":
+
+```python
+def monthly_cost(n_calls, tokens_in, tokens_out, p_in=3e-6, p_out=15e-6):
+    return n_calls * (tokens_in * p_in + tokens_out * p_out)
+
+rag   = monthly_cost(100_000, 2500, 300)   # retrieval inflates input tokens
+tuned = monthly_cost(100_000,  900, 300)   # fine-tuned prompt stays short
+print(rag - tuned)                          # the monthly bill a LoRA must beat
+```
+
+That difference is the break-even question: a fine-tune trades a one-off
+build (data, training, evaluation — Days 40 and 41) for permanently cheaper
+inference. Compute the payback before committing.
+
+## Long context is not a free RAG
+
+$$C_{ctx} = n_{in} \cdot p_{in}$$
+
+re-reads the *entire* corpus on every single call, so cost and prefill
+latency grow linearly with everything you stuff into the window. Attention
+quality also degrades mid-window — models recall the start and end of a long
+context better than the middle. For repeated questions over a stable corpus,
+an index wins; for "read this 80-page contract once", the window wins.
+
+<Callout kind="deep" title="Behavior vs knowledge — the one distinction to keep">
+  Fine-tuning changes how the model *behaves*: format, tone, skill, refusal
+  style. RAG changes what the model *knows* at answer time. Teams burn weeks
+  fine-tuning facts that a one-line retrieval fix would have supplied — and
+  the model quietly forgets them the next quarter anyway. Whenever a
+  stakeholder says "train it on our docs", translate that to RAG.
+</Callout>
+
+## Resources
+
+- [OpenAI fine-tuning guide](https://platform.openai.com/docs/guides/fine-tuning) — when the provider-side docs say to fine-tune, and when they say not to.
+- [Anthropic prompt engineering overview](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview) — how far prompting alone carries you.
+- [Hugging Face PEFT docs](https://huggingface.co/docs/peft) — the open-model side of tomorrow's ladder rung.
+
+## Exercise
+
+1. Write the four answers (knowledge or behavior, data size, drift, budget)
+   for a real task you have this week. Name the ladder rung you should be
+   on — and the rung you were about to jump to.
+2. Compute the monthly cost delta between a RAG pipeline with 2,500 input
+   tokens per call and a hypothetical fine-tune with 900, at your realistic
+   call volume. State the payback period given a one-day build effort.
+3. Take yesterday's RAG bot and replace retrieval with a long-context dump
+   of the same corpus. Compare cost, latency and answer quality on the same
+   10 questions. Commit a short verdict.
+
+<Quiz
+  question="A stable task with a fixed output format runs 1M calls a day. Prompting works, but input tokens are expensive. Best move?"
+  options={["Add more few-shot examples to every call", "Move to long context with all documents attached", "Fine-tune (LoRA) so the prompt can shrink while quality holds", "Increase temperature to generate shorter answers"]}
+  answer={2}
+  explanation="At high, stable volume the recurring cost dominates. A fine-tune bakes format and skill into weights, so per-call prompts shrink — the classic economics that justify tomorrow's work."
+/>

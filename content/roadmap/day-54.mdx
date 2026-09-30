@@ -1,0 +1,127 @@
+---
+day: 54
+title: "Monitoring: drift, metrics and retraining triggers"
+phase: 5
+minutes: 85
+objectives:
+  - "Distinguish data drift from concept drift and detect the first with KS tests and PSI"
+  - "Watch serving metrics: latency, error rate and the prediction distribution itself"
+  - "Write an explicit retraining trigger policy and vet candidates with a shadow deployment"
+tags: ["monitoring", "drift", "psi", "mlops", "reliability"]
+math:
+  - "probability/random-variables-distributions"
+---
+
+You can now ship a model and track its birth. The uncomfortable truth is what
+happens next: models rot while dashboards stay green. Today you build the
+alarms — and tomorrow the capstone begins, so these habits go straight to
+work.
+
+## 1. Two ways a model decays
+
+Remember random variables from the probability track: a model is fit on
+samples drawn from a distribution, and deployment does not freeze that
+distribution. Two distinct failures follow:
+
+- **Data drift** — the inputs $P(X)$ shift while the relationship
+  $P(Y \mid X)$ holds. A recession moves the income distribution; the meaning
+  of the features is unchanged. Detectable *without labels*.
+- **Concept drift** — the relationship $P(Y \mid X)$ itself changes. Same
+  incomes, but a new government program redefines what stress looks like.
+  Needs labels, so it is found late.
+
+Both silently void the i.i.d. assumption your validation set stood on.
+
+## 2. Detecting drift: KS test and PSI
+
+The two-sample Kolmogorov-Smirnov statistic compares the empirical CDFs of
+train and serving data:
+
+$$D_{KS} = \sup_x \left\lvert F_{\text{train}}(x) - F_{\text{serve}}(x) \right\rvert$$
+
+$D_{KS}$ is itself a random variable: under the null hypothesis that both
+samples share a distribution, the test's p-value tells you how surprising the
+observed gap is. PSI buckets both distributions into $B$ bins and sums:
+
+$$\mathrm{PSI} = \sum_{i=1}^{B} (p_i - q_i)\,\ln\!\frac{p_i}{q_i}$$
+
+with $p_i$ and $q_i$ the population shares of bin $i$ in train and serving
+data. Rule of thumb: below 0.1 is quiet, 0.1 to 0.25 is watch, above 0.25 is
+act.
+
+```python
+import numpy as np
+from scipy import stats
+
+def psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
+    edges = np.quantile(expected, np.linspace(0, 1, bins + 1))
+    edges[0], edges[-1] = -np.inf, np.inf              # open-ended tails
+    e = np.histogram(expected, edges)[0] / len(expected)
+    a = np.histogram(actual, edges)[0] / len(actual)
+    e, a = np.clip(e, 1e-6, None), np.clip(a, 1e-6, None)   # avoid log(0)
+    return float(np.sum((a - e) * np.log(a / e)))
+
+for col in NUMERIC_FEATURES:
+    ks = stats.ks_2samp(train[col], serve[col])
+    score = psi(train[col], serve[col])
+    if ks.pvalue < 0.01 or score > 0.25:
+        print(f"DRIFT {col}: KS p-value {ks.pvalue:.4f}, PSI {score:.3f}")
+```
+
+## 3. Serving metrics: the system and the output
+
+Two dashboards, both mandatory. **System health**: latency p50 and p95, error
+rate, throughput — the Day-51 and Day-52 work, watched in production.
+**Model health without labels**: the prediction distribution itself. Log
+every prediction; if the mean predicted probability jumps from 0.20 to 0.50
+overnight, either the world changed or an upstream pipeline did — both are
+pages. Often this output shift is your first and only label-free alarm.
+
+## 4. Shadow deployment and retraining triggers
+
+Never promote a candidate on offline metrics alone. A **shadow deployment**
+mirrors live traffic to the candidate model, logs its predictions, and serves
+nothing to users; when labels arrive you compare both models on the same real
+outcomes and promote with evidence. Then write the triggers down as policy,
+because "we will keep an eye on it" is not a policy:
+
+- PSI above 0.25 on two consecutive windows — investigate before retraining.
+- Relative PR-AUC drop above 10 percent once labels land — retrain.
+- Calendar-based refresh every quarter regardless.
+- Always first: rule out an upstream bug — a renamed column looks exactly
+  like drift.
+
+<Callout kind="deep" title="Why silent decay is the industry default">
+  Software fails loudly — exceptions, 500s, stack traces. Models fail
+  politely: the API returns 200 with confidently wrong numbers, uptime stays
+  perfect and every dashboard is green. Ground truth arrives weeks late
+  (defaults materialize, stress surveys come in quarterly), so nothing
+  compares predictions to reality in real time — decay is silent *by
+  construction*, not by negligence. Drift monitors, prediction-distribution
+  alarms and label-backfill comparisons are how you give it a voice.
+</Callout>
+
+## Resources
+
+- [Evidently documentation](https://docs.evidentlyai.com/) — open-source drift and report tooling.
+- [scipy.stats.ks_2samp](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ks_2samp.html) — the test used above.
+- [Google — Rules of Machine Learning](https://developers.google.com/machine-learning/guides/rules-of-ml) — see the rules on monitoring and model staleness.
+
+## Exercise
+
+1. Split the Financial Stress data into two halves (by time or by index),
+   compute KS and PSI for every numeric feature between the halves, and list
+   the features that trip your thresholds.
+2. Serve the test set through yesterday's API, then PSI-compare the predicted
+   probabilities against the training labels' distribution — write down what
+   a threshold breach would and would not mean.
+3. Draft a one-page retraining trigger policy for the capstone model:
+   thresholds, windows, actions, and the upstream-bug checklist. Commit it
+   next to the pipeline.
+
+<Quiz
+  question="Serving data shows strong PSI drift on the income feature, but ground-truth labels have not arrived yet. What can you legitimately conclude?"
+  options={["The model's accuracy has already dropped and must be retrained now", "The input distribution has shifted; performance impact is plausible but unconfirmed until labels arrive", "Concept drift is confirmed and the target definition changed", "Nothing — PSI only measures latency distribution shifts"]}
+  answer={1}
+  explanation="PSI and KS detect input-distribution shift without labels; they justify investigation, but only label-based evaluation can confirm the performance impact or concept drift."
+/>

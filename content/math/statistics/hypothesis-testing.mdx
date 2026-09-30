@@ -1,0 +1,142 @@
+---
+title: "Hypothesis testing"
+summary: "Null hypotheses, p-values and power — the machinery for deciding whether a difference is real or just noise, and the traps it sets for you."
+order: 2
+---
+
+The CLT tells you sample means are noisy. Hypothesis testing tells you how
+much noise — enough to answer the question every experiment, feature and
+model change eventually asks: *is this difference real, or did randomness
+hand it to me?*
+
+## The null and alternative hypotheses
+
+Every test stages a courtroom drama between two claims:
+
+- $H_0$ (null): there is no effect — the treatment does nothing, the new
+  model is the same as the old one. The default you hold until evidence
+  convicts it.
+- $H_1$ (alternative): there is an effect — what you usually hoped was true.
+
+You never prove $H_0$; you either *reject* it (evidence against it is strong)
+or *fail to reject* it (evidence is weak — which is not the same as evidence
+of absence). The word "significant" has a precise meaning here: unlikely
+under $H_0$. It does not mean important, large, or useful.
+
+## Test statistics and p-values
+
+A **test statistic** condenses your data into one number that measures how
+far the data sits from what $H_0$ predicts, in units of its own noise:
+
+$$t = \frac{\text{estimate} - \text{hypothesized value}}{\text{standard error}}$$
+
+The **p-value** is the probability — computed *assuming* $H_0$ is true — of
+seeing a statistic at least this extreme:
+
+$$p = P\!\left(\text{data at least this extreme} \;\middle|\; H_0\right)$$
+
+Read the conditioning carefully: the p-value is **not** the probability that
+$H_0$ is true, and not the probability the result happened by chance. It
+answers "if there were truly no effect, how surprising is my sample?" — a
+small $p$ means the no-effect story struggles to explain your data.
+
+## A t-test, end to end with numbers
+
+A vendor claims their inference endpoint averages 12 ms latency. You time
+$n = 36$ requests and get $\bar{x} = 11.3$ ms with $s = 1.5$ ms. Faster —
+but is 0.7 ms beyond noise?
+
+1. Hypotheses: $H_0: \mu = 12$ vs $H_1: \mu \ne 12$, significance level
+   $\alpha = 0.05$.
+2. Standard error: $\text{SE} = s/\sqrt{n} = 1.5/6 = 0.25$ ms.
+3. Statistic: $t = (11.3 - 12)/0.25 = -2.8$, with $n - 1 = 35$ degrees of
+   freedom.
+4. A t-distribution with 35 degrees of freedom puts only about $p \approx 0.008$
+   of its probability at $\lvert t \rvert \ge 2.8$.
+
+Since $p = 0.008$ is below $\alpha = 0.05$, reject $H_0$: the endpoint really
+is faster, and it is not a fluke of your 36 requests. Equivalently, the
+observed $t = -2.8$ sits beyond the 2.5% critical value of roughly
+$\pm 2.03$.
+
+## Type I and type II errors
+
+Two ways to be wrong, with asymmetric costs:
+
+| | Reject $H_0$ | Fail to reject $H_0$ |
+|---|---|---|
+| $H_0$ true | **Type I error** (false alarm), rate $\alpha$ | correct |
+| $H_0$ false | correct (probability $1-\beta$) | **Type II error** (miss), rate $\beta$ |
+
+**Statistical power** is $1 - \beta$: the probability your test detects an
+effect that truly exists. Power grows with sample size, with the size of the
+effect, and with how much you tolerate false alarms ($\alpha$). Underpowered
+tests are the quiet killer of applied work — you run a real improvement, get
+a noisy "no significant difference", and ship the status quo.
+
+<Callout kind="warn" title="Connection to ML">
+  Feature selection is a multiple-comparisons minefield. Screen 100 features
+  for correlation with the target at $\alpha = 0.05$ and, even if *none*
+  matter, about five will look significant by pure chance — features that are
+  noise with a p-value costume. Control this with Bonferroni
+  ($\alpha/m$ per test) or, better, validate selected features on data they
+  were never selected on.
+</Callout>
+
+## The multiple-comparisons trap
+
+Run one test at $\alpha = 0.05$ and you accept a 5% false-alarm rate. Run 20
+independent tests and the chance of *at least one* false alarm is
+
+$$P(\text{at least one}) = 1 - (0.95)^{20} \approx 0.64$$
+
+Sixty-four percent. A/B platforms that track dozens of metrics, and
+researchers who test twenty hyperparameter choices, are testing many
+hypotheses at once — one of them will "win" eventually. Bonferroni's fix is
+brutally simple: test each hypothesis at $\alpha/m$ for $m$ tests, buying
+protection at the cost of power.
+
+## Resources
+
+- [StatQuest — p-values](https://www.youtube.com/watch?v=vemZtEM63GY) — what they are and how to interpret them.
+- [Seeing Theory — Frequentist Inference](https://seeing-theory.brown.edu/frequentist-inference/index.html) — interactive p-values and confidence intervals.
+- [Khan Academy — Significance tests](https://www.khanacademy.org/math/statistics-probability/significance-tests-one-sample) — worked t-test drills.
+- [OpenIntro Statistics](https://www.openintro.org/book/os/) — chapters 5 and 7 for testing frameworks.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  You add a feature to your credit-risk model and evaluate both versions on
+  the same 25 cross-validation folds. The per-fold improvement has mean
+  $0.9$ percentage points with standard deviation $s = 2.0$ points. Test at
+  $\alpha = 0.05$ whether the feature helps, and state the type I and type
+  II risks in this decision.
+</Callout>
+
+<Solution>
+  Treat the 25 per-fold improvements as one sample and test
+  $H_0: \mu = 0$ (no real improvement) with a one-sample t-test.
+
+  $$\text{SE} = \frac{s}{\sqrt{n}} = \frac{2.0}{\sqrt{25}} = 0.4$$
+
+  $$t = \frac{0.9 - 0}{0.4} = 2.25, \quad df = 24$$
+
+  The two-sided critical value at $\alpha = 0.05$ with 24 degrees of freedom
+  is about $2.064$. Since $2.25$ exceeds it (corresponding to
+  $p \approx 0.034$), reject $H_0$: the improvement is distinguishable from
+  fold-to-fold noise.
+
+  Type I risk: the feature actually does nothing and you adopted it anyway —
+  capped at 5% by design. Type II risk: the feature helps but 25 folds are
+  too noisy to prove it, and you wrongly discard it. With $s = 2.0$ and
+  $n = 25$, only improvements of roughly $2.064 \times 0.4 \approx 0.8$
+  points or more are detectable — anything smaller is in the power blind
+  spot.
+</Solution>
+
+<Quiz
+  question="You run 60 independent A/B tests, each at alpha = 0.05, and all 60 null hypotheses are in fact true. Roughly how many will come out significant?"
+  options={["0 — no effects means no significance", "About 3", "About 12", "All 60"]}
+  answer={1}
+  explanation="Each test has a 5% false-alarm rate by construction, so 0.05 x 60 = 3 significant results are expected purely by chance — the multiple-comparisons trap that Bonferroni correction targets."
+/>

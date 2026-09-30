@@ -1,0 +1,134 @@
+---
+title: "Partial derivatives and the gradient"
+summary: "One variable at a time: how the gradient vector packages a million sensitivities into a single direction of steepest change."
+order: 2
+---
+
+A real model's loss depends on every parameter at once — $J(\theta_1, \dots,
+\theta_d)$ with $d$ in the thousands or billions. Nobody can picture that
+surface, and nobody needs to: calculus handles it by staying disciplined and
+changing one thing at a time.
+
+## Functions of several variables
+
+A multivariable function eats a vector and returns one number. The squared
+error of a linear model is the canonical example:
+
+$$J(w, b) = \frac{1}{n} \sum_{i=1}^{n} \big(w x_i + b - y_i\big)^2$$
+
+Plot it and you get a surface. Mark every point where $J = c$ for a few
+constants $c$ and you get **level sets** — the contour lines of a topographic
+map. Keep that picture; it pays off in a moment.
+
+## Hold everything else fixed
+
+The partial derivative of $f$ with respect to $x$ is the ordinary derivative,
+taken while every other variable is frozen in place:
+
+$$\frac{\partial f}{\partial x} = \lim_{h \to 0}
+\frac{f(x+h,\; y) - f(x,\; y)}{h}$$
+
+All the single-variable rules apply unchanged — you just treat the other
+symbols as constants. For $f(x, y) = 3x^2 y$:
+
+$$\frac{\partial f}{\partial x} = 6xy \qquad\quad
+\frac{\partial f}{\partial y} = 3x^2$$
+
+## The gradient — and the Jacobian
+
+Stack the $d$ partials into a vector, the **gradient**:
+
+$$\nabla f = \begin{bmatrix}
+\frac{\partial f}{\partial x_1} \\
+\vdots \\
+\frac{\partial f}{\partial x_d}
+\end{bmatrix}$$
+
+Two facts make it the most reused object in machine learning:
+
+- **Direction.** $\nabla f$ points in the direction of steepest *increase*
+  and is perpendicular to the level sets. So $-\nabla f$ points downhill,
+  straight across the contours of that topographic map.
+- **Magnitude.** Its length $\lVert \nabla f \rVert$ is the slope in that
+  direction — how steep "steepest" actually is at this point.
+
+When the function returns a vector instead of a scalar, the collection of
+all partials becomes a matrix — the **Jacobian**, with entries
+$J_{ij} = \partial f_i \, / \, \partial x_j$. Every layer of a neural network
+is vector-valued, so backpropagation is largely bookkeeping for Jacobians;
+the next lesson makes that precise.
+
+<Callout kind="deep" title="Reading the loss surface">
+  Each partial $\partial J / \partial \theta_i$ answers a question you
+  actually care about: *if I nudge weight $i$ up by a tiny amount, how much
+  does the loss change?* The gradient is that answer for every weight at
+  once. On a contour plot of the loss, the gradient is the uphill arrow and
+  the negative gradient the downhill one — always crossing contours at a
+  right angle, never along them. Every optimizer you will ever run is a
+  variation on "step along the negative gradient."
+</Callout>
+
+## A worked example: both partials
+
+Let $f(x, y) = x^2 y + e^{xy}$.
+
+With respect to $x$, holding $y$ fixed: the term $x^2 y$ differentiates by
+the power rule to $2xy$; the term $e^{xy}$ differentiates by the chain rule
+to $e^{xy} \cdot y$. So
+
+$$\frac{\partial f}{\partial x} = 2xy + y\, e^{xy}$$
+
+With respect to $y$, holding $x$ fixed: $x^2 y$ is linear in $y$ and gives
+$x^2$; $e^{xy}$ contributes $e^{xy} \cdot x$. So
+
+$$\frac{\partial f}{\partial y} = x^2 + x\, e^{xy}$$
+
+Evaluate at $(1, 1)$: the partials are $2 + e \approx 4.72$ and
+$1 + e \approx 3.72$, so
+
+$$\nabla f(1, 1) \approx (4.72, \; 3.72), \qquad
+\lVert \nabla f(1,1) \rVert \approx 6.0$$
+
+The surface rises in every direction from this point, and the fastest way
+down is along the vector $(-4.72, \; -3.72)$.
+
+## Resources
+
+- [Khan Academy — Multivariable calculus](https://www.khanacademy.org/math/multivariable-calculus) — partial derivatives, gradients and tangent-plane units.
+- [MIT OCW 18.02SC — Multivariable Calculus](https://ocw.mit.edu/courses/18-02sc-multivariable-calculus-fall-2010/) — parts I and II cover everything in this track.
+- [Parr & Howard — The Matrix Calculus You Need For Deep Learning](https://explained.ai/matrix-calculus/) — where partials become Jacobians become backprop.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  Let $J(\theta_1, \theta_2) = (\theta_1 - 3)^2 + 2(\theta_2 + 1)^2$.
+  (a) Compute $\nabla J$ and evaluate it at the origin. (b) Which single
+  coordinate move of size $0.5$ reduces $J$ the most? (c) Give the unit
+  direction of steepest descent.
+</Callout>
+
+<Solution>
+  (a) $\nabla J = \big(2(\theta_1 - 3), \;\; 4(\theta_2 + 1)\big)$, so at the
+  origin $\nabla J(0, 0) = (-6, \; 4)$. The loss there is $J = 9 + 2 = 11$.
+
+  (b) Moving $\theta_1$ up by $0.5$: $J = (-2.5)^2 + 2 = 8.25$, a drop of
+  $2.75$. Moving $\theta_2$ down by $0.5$: $J = 9 + 2(0.5)^2 = 9.5$, a drop
+  of $1.5$. The $\theta_1$ move wins — matching its larger partial magnitude
+  ($6$ versus $4$).
+
+  (c) Steepest descent is $-\nabla J = (6, -4)$, with length
+  $\sqrt{36 + 16} = \sqrt{52} \approx 7.21$. The unit direction is therefore
+
+  $$\frac{(6, -4)}{\sqrt{52}} \approx (0.83, \; -0.55)$$
+
+  Notice the workflow: gradient, flip the sign, normalize. That is exactly
+  what a gradient descent step does, just with the learning rate scaling the
+  length instead.
+</Solution>
+
+<Quiz
+  question="On a contour plot of a loss surface, the negative gradient at a point points..."
+  options={["Along the nearest contour line", "Perpendicular to the contours, toward lower loss", "Toward the origin of parameter space", "In whatever direction you initialized"]}
+  answer={1}
+  explanation="The gradient is perpendicular to level sets and points uphill, so the negative gradient crosses the contours at a right angle toward lower loss. Sliding along a contour leaves the loss unchanged to first order."
+/>

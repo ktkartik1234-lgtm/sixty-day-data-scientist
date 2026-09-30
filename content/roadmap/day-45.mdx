@@ -1,0 +1,134 @@
+---
+day: 45
+title: "LLM checkpoint: a domain Q&A bot with RAG"
+phase: 4
+minutes: 120
+objectives:
+  - "Build the full RAG pipeline: chunk, embed, index, retrieve, generate"
+  - "Create a 10-question eval with gold chunks before tuning anything"
+  - "Report hits@k, citation accuracy, refusals, latency and cost"
+tags: ["llm", "rag", "checkpoint", "evaluation", "genai"]
+papers:
+  - "rag"
+blog:
+  - "hello-60-days"
+---
+
+Phase 4's build day: one working artifact that combines Days 36 through 44 —
+API discipline, embeddings, retrieval, evaluation and guardrails. Ship it
+running tonight; tomorrow we turn it into a portfolio piece.
+
+## Choose the corpus, then write the eval first
+
+Pick 15–30 pages of a document set you own or can legally publish against —
+a company handbook, product FAQ, or a stack of ML papers. Requirements:
+enough structure to chunk meaningfully, and questions whose answers genuinely
+live in specific chunks. Then write the 10 eval questions *before* building
+retrieval, each with the gold chunk that answers it. The eval drives the
+design; it never decorates it.
+
+## Chunk, embed, index
+
+```python
+import numpy as np
+import re
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+def chunk(text: str, size: int = 800, overlap: int = 100) -> list[str]:
+    step = size - overlap
+    return [text[i:i + size] for i in range(0, len(text), step)]
+
+class Index:
+    def __init__(self, chunks: list[str]):
+        self.chunks = chunks
+        E = model.encode(chunks)
+        self.M = E / np.linalg.norm(E, axis=1, keepdims=True)  # unit vectors
+
+    def search(self, query: str, k: int = 3):
+        q = model.encode([query])
+        q = q / np.linalg.norm(q, axis=1, keepdims=True)
+        scores = (self.M @ q.T).ravel()          # brute force: fine at this scale
+        top = np.argsort(-scores)[:k]
+        return [(self.chunks[i], float(scores[i]), i) for i in top]
+```
+
+## Retrieve, generate, cite, refuse
+
+```python
+PROMPT = """Answer using ONLY the numbered sources. Cite them as [n].
+If the sources do not answer the question, reply exactly: NOT_IN_SOURCES.
+
+Sources:
+{sources}
+
+Question: {question}
+"""
+
+def answer(question: str, index: Index, llm, k: int = 3):
+    hits = index.search(question, k)
+    sources = "\n\n".join(f"[{i}] {c}" for i, (c, s, _) in enumerate(hits))
+    out = llm(PROMPT.format(sources=sources, question=question), temperature=0.0)
+    return out, hits
+```
+
+## The 10-question eval: hits@k and citation accuracy
+
+Two metrics, both from Day 38's definitions. hits@k asks whether retrieval
+found the gold chunk; citation accuracy asks whether the answer actually
+cited it:
+
+```python
+def evaluate(questions, index: Index, llm, k: int = 3):
+    hits_k, cite_acc = [], []
+    for q, gold in questions:
+        out, hits = answer(q, index, llm, k)
+        top_ids = [h[2] for h in hits]                    # global chunk ids
+        hits_k.append(gold in top_ids)
+        cited = {top_ids[int(n)] for n in re.findall(r"\[(\d+)\]", out)
+                 if int(n) < len(top_ids)}
+        cite_acc.append(bool(cited) and gold in cited)
+    n = len(questions)
+    return sum(hits_k) / n, sum(cite_acc) / n
+```
+
+Your day-36 wrapper logs latency and cost per call — record the median.
+
+## Report like an engineer
+
+One table, seven numbers: hits@1, hits@3, citation accuracy, refusal
+correctness on 3 planted unanswerable questions (the NOT_IN_SOURCES check),
+median latency, and cost per 1,000 questions. Then one paragraph of failure
+analysis: pick the worst hits@3 miss and diagnose it — wrong chunk size,
+wrong embedding, or the answer genuinely split across chunks.
+
+<Callout kind="tip" title="Evaluate retrieval before generation">
+  If hits@3 lands under roughly 0.7, no prompt edit will save this bot —
+  fix chunk size, overlap or the embedding model first. You already ran
+  that ablation on Day 37; rerun it here with your real corpus and let the
+  numbers pick the config.
+</Callout>
+
+## Resources
+
+- [RAG paper (Lewis et al., 2020)](https://arxiv.org/abs/2005.11401) — the architecture you just built by hand.
+- [Sentence Transformers docs](https://www.sbert.net/) — the embedding model powering the index.
+- [LlamaIndex docs](https://docs.llamaindex.ai/) — the production framework version of every component here.
+
+## Exercise
+
+1. Run the full pipeline on your corpus. Commit the metrics table — hits@1,
+   hits@3, citation accuracy, refusals — in the README or the commit message.
+2. Ablate chunk size at 400, 800 and 1600 characters (overlap 100); report
+   hits@3 for each and keep the winner. One line per config, no exceptions.
+3. Add the 3 unanswerable questions and verify the bot replies
+   NOT_IN_SOURCES. If it confabulates even once, tighten the refusal clause
+   and rerun until clean — record before and after.
+
+<Quiz
+  question="Your eval reports hits@3 of 0.4. What is the best first move?"
+  options={["Rewrite the generation prompt with stricter instructions", "Increase temperature so answers explore more", "Improve retrieval: chunk size, overlap, embedding model, or a reranker", "Fine-tune the generator on the corpus"]}
+  answer={2}
+  explanation="When the gold chunk is missing from context 60 percent of the time, generation cannot be the bottleneck. Fix the retrieval layer first — the prompt and the model only amplify what retrieval supplies."
+/>

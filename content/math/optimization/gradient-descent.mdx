@@ -1,0 +1,122 @@
+---
+title: "Gradient descent"
+summary: "One update rule powers almost all of machine learning — how it works, why the learning rate dominates, and where it gets stuck."
+order: 1
+---
+
+Calculus hands you a direction; optimization turns it into an algorithm.
+Gradient descent is that algorithm — a few lines of arithmetic that, applied
+persistently, train everything from linear regression to billion-parameter
+language models.
+
+## The update rule
+
+$$\theta_{t+1} = \theta_t - \eta\, \nabla J(\theta_t)$$
+
+Read it right to left: at the current parameters $\theta_t$, compute the
+gradient of the loss, then step a small amount $\eta$ — the **learning rate**
+— in the *opposite* direction. Downhill, since $\nabla J$ points uphill.
+Repeat until the loss stops improving. In one dimension it is barely anything
+at all:
+
+$$\theta \leftarrow \theta - \eta\, J'(\theta)$$
+
+Everything else in this track — momentum, adaptivity, schedules — is a
+refinement of this one line.
+
+## The learning rate dominates everything
+
+Take the toy loss $J(\theta) = \theta^2$ with $J'(\theta) = 2\theta$. The
+update collapses to:
+
+$$\theta_{t+1} = \theta_t - 2\eta\,\theta_t = (1 - 2\eta)\,\theta_t$$
+
+Every step multiplies the distance to the optimum by $|1 - 2\eta|$, which
+sorts all behavior into four regimes:
+
+- Small $\eta$ (say $0.1$): smooth geometric convergence — safe but slow.
+- $\eta = 0.5$: one perfect step straight to the bottom.
+- Between $0.5$ and $1$: overshoot and oscillate, but still shrink.
+- Above $1$: every step makes things worse — divergence.
+
+Real networks tell the same story with extra noise, which is why the learning
+rate is the first hyperparameter anyone tunes and the last one they stop
+tuning.
+
+<Callout kind="tip" title="Reading a loss curve">
+  Loss exploding or producing NaN? Lower the learning rate first. Crawling
+  down almost imperceptibly? Raise it. Sawtoothing with no trend? The
+  iterate is oscillating across a valley floor — lower it or add momentum.
+  Before tuning anything fancier, sweep the rate on a log scale: one run per
+  decade from $10^{-5}$ up to $10^{-1}$ tells you which regime you are in.
+</Callout>
+
+## Batch, mini-batch or stochastic
+
+The gradient in the update rule is an average over data, and how you estimate
+it defines three regimes:
+
+| Variant | Gradient from | Per-step cost | Noise |
+|---|---|---|---|
+| Batch | all $n$ examples | high | none |
+| Mini-batch | a chunk of 32–1024 | moderate | some |
+| Stochastic | a single example | tiny | lots |
+
+Mini-batch is the working default: cheap enough to take many steps per epoch,
+accurate enough to descend. The noise is not pure downside — it jitters the
+trajectory out of shallow traps and acts as a mild regularizer. Full batch
+buys an exact gradient you rarely need; single-example stochastic descent is
+mostly of historical and theoretical interest.
+
+## Where descent gets stuck
+
+Non-convex losses — the geometry of the next lesson — add terrain beyond
+smooth bowls. **Saddle points**, flat in some directions while curving up in
+others, are the common failure mode in high dimensions, far more common than
+true local minima. **Plateaus** of tiny gradients make progress crawl.
+
+A minimal saddle: $J(w_1, w_2) = w_1^2 - w_2^2$ has zero gradient at the
+origin, so plain descent stops there — yet it is no minimum. Nudge the
+iterate to $(0.1, \; 0)$ and the next step slides back toward the valley in
+$w_1$ but *away* along $w_2$: the update
+$\theta_{t+1} = \theta_t - \eta \nabla J$ actively climbs the $-w_2^2$ term.
+The standard defenses are exactly this kind of jitter — noisy mini-batches,
+momentum and adaptive step sizes — the subject of the final lesson in this
+track.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  Minimize $J(\theta) = \theta^2$ by gradient descent from $\theta_0 = 3$
+  with learning rate $\eta = 0.1$. (a) Compute two full steps and the loss
+  after each. (b) Describe the pattern and estimate how many steps to get
+  within $0.01$ of the optimum. (c) What does $\eta = 1$ do instead?
+</Callout>
+
+<Solution>
+  The derivative is $J'(\theta) = 2\theta$.
+
+  (a) Step 1: gradient $= 2 \times 3 = 6$, so
+  $\theta_1 = 3 - 0.1 \times 6 = 2.4$ and $J(\theta_1) = 5.76$.
+  Step 2: gradient $= 2 \times 2.4 = 4.8$, so
+  $\theta_2 = 2.4 - 0.1 \times 4.8 = 1.92$ and $J(\theta_2) = 3.6864$.
+
+  (b) Each step multiplies the distance to the optimum by
+  $1 - 2(0.1) = 0.8$, so $\theta_t = 3 \times 0.8^t$ — geometric convergence,
+  with the loss shrinking by a factor of $0.64$ per step. Reaching a distance
+  of $0.01$ needs
+
+  $$t \approx \frac{\ln(0.01/3)}{\ln(0.8)} \approx 26 \text{ steps}$$
+
+  (c) At $\eta = 1$ the update becomes $\theta_{t+1} = -\theta_t$: the
+  iterate bounces between $3$ and $-3$ forever. That is the oscillation
+  regime — one notch above divergence, and the classic signature of a rate
+  set too high for the curvature.
+</Solution>
+
+<Quiz
+  question="Halfway through training, the loss starts oscillating up and down with no trend. What is the most likely first fix?"
+  options={["Lower the learning rate", "Lower the batch size", "Add more layers", "Train for more epochs"]}
+  answer={0}
+  explanation="Oscillation with no trend is the signature of steps too large for the local curvature — each update overshoots the valley floor on the other side. Shrinking the learning rate, or adding momentum at a smaller rate, is the standard first move."
+/>

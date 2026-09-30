@@ -1,0 +1,150 @@
+---
+day: 36
+title: "Working with LLM APIs: parameters and structured output"
+phase: 4
+minutes: 90
+objectives:
+  - "Set temperature, top_p and max_tokens deliberately instead of by default"
+  - "Guarantee schema-valid JSON with validation and a repair loop"
+  - "Harden calls with timeouts, exponential backoff and idempotency"
+  - "Estimate cost and latency of a call before you make it"
+tags: ["llm", "api", "engineering", "genai"]
+papers:
+  - "language-models-are-few-shot-learners"
+---
+
+Yesterday the prompt was the interface; today the API call around it becomes
+the product. The difference between a demo and a system is what happens when
+the call fails, returns malformed JSON, or costs more than you expected.
+
+## The parameters that matter
+
+```python
+params = {
+    "temperature": 0.0,   # deterministic tasks: classification, extraction
+    "top_p": 1.0,         # tune temperature OR top_p, rarely both
+    "max_tokens": 512,    # hard ceiling; generation stops cleanly at it
+    "stop": ["\n\n"],     # cheap early exit instead of paying to trim
+}
+```
+
+Three rules keep you out of trouble. One: temperature and top_p both reshape
+the sampling distribution — moving both at once makes experiments
+uninterpretable. Two: max_tokens truncation is a failure you must *detect* —
+check the finish reason. Three: a stop sequence buys short outputs for free,
+while asking for brevity in prose costs tokens and compliance.
+
+## JSON mode and the repair loop
+
+Providers offer native JSON or schema modes (structured outputs, tool use) —
+use them. But validate on your side anyway, because a single malformed
+response in ten thousand will otherwise poison a downstream pipeline:
+
+```python
+import json
+
+SCHEMA = {"label": str, "confidence": float}
+
+def structured_call(make_call, prompt: str, schema: dict, retries: int = 2):
+    """Ask, validate, repair. The loop is the lesson, not the SDK."""
+    current = prompt + "\nReturn ONLY valid JSON with keys: " + ", ".join(schema)
+    for attempt in range(retries + 1):
+        raw = make_call(current)
+        try:
+            out = json.loads(raw)
+        except json.JSONDecodeError:
+            current = f"{prompt}\n\nYour last reply was not valid JSON: {raw}\nReturn JSON only."
+            continue
+        ok_types = all(isinstance(out.get(k), schema[k]) for k in schema)
+        if set(out) == set(schema) and ok_types:
+            return out
+        current = f"{prompt}\n\nYour JSON had wrong keys or types. Required: {schema}."
+    raise ValueError("structured output failed after retries")
+```
+
+The repair prompt shows the model its own bad output — models are far better
+at fixing their formatting than at guessing what broke.
+
+## Retries, timeouts and idempotency
+
+Rate limits (429) and transient server errors (5xx) are normal traffic, not
+exceptions to escalate. The standard treatment is exponential backoff with
+jitter — the jitter prevents a thousand clients from retrying in lockstep:
+
+```python
+import random, time
+
+def call_llm(prompt: str, *, temperature: float = 0.0,
+             max_retries: int = 5, base_delay: float = 1.0) -> str:
+    """Provider-agnostic sketch — names vary by SDK; the shape is the lesson."""
+    for attempt in range(max_retries):
+        try:
+            return provider.complete(prompt, temperature=temperature, timeout=30)
+        except RateLimitError:                    # 429: back off with jitter
+            time.sleep(base_delay * 2**attempt + random.uniform(0, 0.5))
+        except (TimeoutError, ServerError):       # 5xx: retry transient errors
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(base_delay * 2**attempt)
+    raise RuntimeError("exhausted retries")
+```
+
+Idempotency is the other half: a retried request must not double-bill or
+double-send. Key side effects by a hash of prompt plus parameters, and make
+the operation behind the key safe to run twice.
+
+## Cost and latency: the two curves you manage
+
+Latency has three parts — queueing, reading your input, and generating the
+output one token at a time:
+
+$$T_{latency} \approx T_{queue} + T_{prefill}(n_{in}) + n_{out} \cdot T_{decode}$$
+
+Cost is simpler and dominated by tokens in both directions:
+
+$$C_{call} = n_{in} \cdot p_{in} + n_{out} \cdot p_{out}$$
+
+Input tokens are cheaper but multiplied by every call in a context-heavy
+pipeline; output tokens are pricier and *sequential*, so they set the wall
+clock. Cache or reuse system prompts when the provider supports it, batch
+independent calls, and estimate before you deploy:
+
+```python
+def monthly_cost(n_calls, tokens_in, tokens_out, p_in=3e-6, p_out=15e-6):
+    return n_calls * (tokens_in * p_in + tokens_out * p_out)
+
+print(monthly_cost(30 * 10_000, 1200, 300))   # 10k calls/day at $3/$15 per Mtok
+```
+
+<Callout kind="tip" title="Log every call">
+  Record prompt hash, parameters, latency, token counts, finish reason and
+  cost for every call. Providers update models silently under stable names;
+  without a log you cannot tell "my prompt regressed" from "the model
+  changed". The log becomes tomorrow's regression detector — Day 41 builds
+  on it.
+</Callout>
+
+## Resources
+
+- [OpenAI API reference](https://platform.openai.com/docs/api-reference) — the parameter surface, request/response shapes and error codes.
+- [OpenAI Cookbook](https://cookbook.openai.com/) — battle-tested recipes for structured output, retries and batching.
+- [Anthropic API docs](https://docs.anthropic.com/) — the same concepts from the second major provider; compare deliberately.
+- [LiteLLM](https://docs.litellm.ai/) — a provider-agnostic wrapper if you want one interface across vendors.
+
+## Exercise
+
+1. Wrap yesterday's classifier in `structured_call`. Feed it 20 responses and
+   5 deliberately malformed ones; count how many repairs the loop recovers.
+2. Build the backoff wrapper against a fake provider that raises
+   `RateLimitError` three times, then succeeds. Print the sleep schedule and
+   confirm total elapsed time matches exponential backoff with jitter.
+3. Estimate the monthly cost of 10k calls/day at 1200 input and 300 output
+   tokens, then cut `max_tokens` to 150 and measure the latency change on
+   20 calls. Commit the numbers alongside the code.
+
+<Quiz
+  question="Why does output length dominate latency far more than input length?"
+  options={["Input tokens are processed in parallel during prefill; output tokens are generated one at a time", "Output tokens are larger in bytes", "Providers deliberately throttle output speed", "Input tokens are cached on disk"]}
+  answer={0}
+  explanation="Prefill computes attention over all input positions in parallel; decoding is sequential — one forward pass per output token — so per-output-token time sets the wall clock."
+/>

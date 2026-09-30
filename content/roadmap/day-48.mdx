@@ -1,0 +1,145 @@
+---
+day: 48
+title: "Agent orchestration: graphs, state and retries"
+phase: 5
+minutes: 80
+objectives:
+  - "Model an agent as an explicit state machine with typed state"
+  - "Choose between free loops and graphs, and between scratchpad and vector-store memory"
+  - "Add human-in-the-loop checkpoints, retries and max-step guardrails"
+tags: ["agents", "orchestration", "state", "langgraph", "reliability"]
+---
+
+Yesterday's `run_agent` was a while-loop with amnesia: one flat transcript, one
+exit condition, no way to resume after a crash. Today you give the loop a
+spine — explicit state, visible transitions, and guardrails that make long
+runs survivable.
+
+## 1. Agents are state machines
+
+Strip away the chat framing and an agent has few states — planning, acting,
+observing, done, failed — plus rules for moving between them. Make the state a
+typed object instead of an unbounded message list:
+
+```python
+from typing import Literal, TypedDict
+
+class AgentState(TypedDict):
+    messages: list                       # the transcript
+    plan: list[str]                      # remaining steps
+    steps_taken: int
+    status: Literal["planning", "acting", "reviewing", "done", "failed"]
+
+def plan_node(state: AgentState) -> dict:
+    steps = call_llm(system=PLANNER_PROMPT, user=state["messages"])
+    return {"plan": steps, "status": "acting"}       # partial state update
+
+def act_node(state: AgentState) -> dict:
+    new = execute_one_step(state["plan"][0])         # tools live here
+    return {"messages": state["messages"] + new,
+            "plan": state["plan"][1:],
+            "steps_taken": state["steps_taken"] + 1}
+
+def route(state: AgentState) -> str:                 # the edges, in one place
+    if state["status"] == "done":
+        return "done"
+    if state["steps_taken"] >= MAX_STEPS:
+        return "failed"
+    return state["status"]
+```
+
+Nodes are functions from state to partial state; edges are one routing
+function you can read, test and unit-check without calling any model.
+
+## 2. Explicit graphs versus free loops
+
+A free loop (yesterday) is flexible and fast to write, and becomes
+undebuggable around step thirty. An explicit graph costs a TypedDict and a
+router, and buys:
+
+- **Testability** — feed a fake state to a node; no model needed.
+- **Resumability** — serialize state mid-run, reload after a crash.
+- **Auditability** — every transition is logged by construction.
+- **Containment** — retries, timeouts and budgets attach to named nodes.
+
+Libraries like LangGraph formalize exactly this; the concept matters more
+than the package. Reach for a graph when runs are long, expensive or
+irreversible; keep the free loop for prototypes.
+
+## 3. Memory: scratchpad versus vector store
+
+- **Scratchpad** — the context window itself: recent messages, the current
+  plan. Fast and faithful, but attention and dollars grow with every turn, so
+  truncate or summarize old turns aggressively.
+- **Vector store** — external long-term memory: past runs, documents and
+  results embedded and retrieved by similarity. Costs a search per step but
+  keeps the context small.
+
+A working split: recent, task-critical context stays in the scratchpad;
+anything older or shareable across runs goes to the store and is retrieved
+on demand.
+
+## 4. Checkpoints, retries and guardrails
+
+Pause before irreversible actions, retry only the transient, cap everything:
+
+```python
+import json, time
+
+RISKY = {"send_payment", "delete_rows"}
+
+def checkpoint(state: AgentState, next_tool: str) -> AgentState:
+    if next_tool in RISKY:                       # human in the loop
+        with open("checkpoint.json", "w") as f:
+            json.dump({k: v for k, v in state.items() if k != "messages"}, f)
+        if input(f"Approve {next_tool}? [y/N] ").strip().lower() != "y":
+            return {**state, "status": "failed"}
+    return state
+
+def with_retries(fn, attempts: int = 3, base: float = 1.0):
+    def wrapped(*args, **kwargs):
+        for i in range(attempts):                # transient failures only
+            try:
+                return fn(*args, **kwargs)
+            except TransientError:
+                if i == attempts - 1:
+                    raise
+                time.sleep(base * 2 ** i)        # 1s, then 2s, then 4s
+    return wrapped
+```
+
+Guardrails are cheap and non-negotiable: a step cap on the loop, a token
+budget per run, and an allowlist of tools per node.
+
+<Callout kind="deep" title="State on disk beats state in the prompt">
+  A crashed forty-step run with no checkpoint costs the full token bill to
+  rerun; with serialized state it costs seconds to resume. The same state
+  file doubles as your audit trail — you can answer "why did the agent delete
+  that row?" from evidence instead of memory. Explicit state is not ceremony;
+  it is the difference between an agent you can operate and one you can only
+  watch.
+</Callout>
+
+## Resources
+
+- [LangGraph documentation](https://langchain-ai.github.io/langgraph/) — graphs, checkpoints and interrupts, formalized.
+- [Anthropic — Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) — the best short guide on staying simple.
+- [Hugging Face — smolagents](https://huggingface.co/docs/smolagents/index) — a minimal open-source agent loop to read against.
+
+## Exercise
+
+1. Rewrite yesterday's agent as `AgentState` plus nodes plus `route`, logging
+   every transition (step, status, tokens) to a JSONL file.
+2. Add the risky-tool checkpoint with a real `input()` prompt, then kill the
+   process mid-run and resume from `checkpoint.json` — prove the resume
+   completes the task.
+3. Inject a `TransientError` into one tool and a `ValueError` into another;
+   confirm the retry wrapper recovers the first and the error-as-result path
+   handles the second. Commit.
+
+<Quiz
+  question="What is the primary purpose of a max-step guardrail on an agent loop?"
+  options={["It makes the model reason more carefully per step", "It improves answer accuracy on long tasks", "It bounds cost and converts infinite plan-act-observe cycles into a tractable failed state", "It replaces the need for memory or checkpoints"]}
+  answer={2}
+  explanation="Agents can loop indefinitely when a tool keeps failing or the plan never converges; a step cap bounds cost and latency, and turns a hang into a failed state you can inspect."
+/>

@@ -1,0 +1,150 @@
+---
+day: 47
+title: "Tool use and function calling"
+phase: 5
+minutes: 80
+objectives:
+  - "Define tools with JSON schemas a model can call reliably"
+  - "Run the model-chooses-tool loop end to end in plain Python"
+  - "Validate arguments and return tool errors so the model can recover"
+tags: ["llm", "agents", "tools", "function-calling", "pydantic"]
+---
+
+Phase 4 ended with models that answer; phase 5 begins with models that *act*.
+Today the model reads your tool list, decides which function to call, and
+your Python executes it — the foundation every agentic system stands on.
+
+## 1. The tool schema is the contract
+
+A tool is a JSON schema plus a description. The model never sees your code —
+it sees the name, the description and the parameter schema, and chooses from
+exactly that.
+
+```python
+tools = [
+    {
+        "name": "convert_currency",
+        "description": "Convert an amount between currencies using daily rates. "
+                       "Use whenever money appears in more than one currency.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "amount":   {"type": "number", "description": "Amount to convert, positive"},
+                "from_ccy": {"type": "string", "enum": ["USD", "EUR", "GBP"]},
+                "to_ccy":   {"type": "string", "enum": ["USD", "EUR", "GBP"]},
+            },
+            "required": ["amount", "from_ccy", "to_ccy"],
+        },
+    },
+]
+```
+
+Three fields do the work: the **name** (verb-like, one concept per tool), the
+**description** (the real prompt — say what it does *and* when to use it),
+and **constrained parameters** (every constraint is one less hallucination).
+
+## 2. The model-chooses-tool loop
+
+The protocol has four beats: send messages plus tools; the model returns a
+tool call (name and JSON arguments); you execute the real function and append
+the result as a tool message; the model continues until it answers in text.
+
+```python
+import json
+
+def convert_currency(amount: float, from_ccy: str, to_ccy: str) -> dict:
+    rates = {"USD": 1.0, "EUR": 0.92, "GBP": 0.79}
+    usd = amount / rates[from_ccy]
+    return {"amount": round(usd * rates[to_ccy], 2), "currency": to_ccy}
+
+TOOLBOX = {"convert_currency": convert_currency}
+
+def run_agent(messages: list, max_steps: int = 8) -> list:
+    for _ in range(max_steps):                  # guardrail: never loop forever
+        reply = client.messages.create(         # any tool-calling API works alike
+            model="claude-sonnet-4-5", max_tokens=1024,
+            tools=tools, messages=messages)
+        messages.append({"role": "assistant", "content": reply.content})
+        calls = [b for b in reply.content if b.type == "tool_use"]
+        if not calls:                           # plain text answer: we are done
+            return messages
+        results = []
+        for call in calls:                      # YOUR code executes, not the model
+            try:
+                output = TOOLBOX[call.name](**call.input)
+            except Exception as exc:            # feed errors back, do not crash
+                output = {"error": str(exc)}
+            results.append({"type": "tool_result", "tool_use_id": call.id,
+                            "content": json.dumps(output)[:2000]})
+        messages.append({"role": "user", "content": results})
+    return messages
+```
+
+The division of labor is the point: the model **decides**, your dispatch table
+**executes**, and the result re-enters the transcript for the next turn.
+
+## 3. Validating arguments and surviving errors
+
+Model-generated arguments are guesses: wrong types, swapped order, enum values
+that do not exist. Validate at the boundary with pydantic, and on failure
+return the error *as the tool result* so the model can self-correct:
+
+```python
+from pydantic import BaseModel, Field, ValidationError
+
+class CurrencyArgs(BaseModel):
+    amount: float = Field(gt=0)
+    from_ccy: str
+    to_ccy: str
+
+VALIDATORS = {"convert_currency": CurrencyArgs}
+
+def safe_execute(call) -> str:
+    validator = VALIDATORS.get(call.name)
+    if validator is not None:
+        try:
+            args = validator(**call.input).model_dump()
+        except ValidationError as exc:
+            return json.dumps({"error": f"invalid arguments: {exc}"})
+    else:
+        args = call.input
+    try:
+        return json.dumps(TOOLBOX[call.name](**args))
+    except Exception as exc:
+        return json.dumps({"error": f"tool failed: {exc}"})
+```
+
+Separate the failure classes: **transient** errors (timeouts, rate limits)
+deserve retry with exponential backoff; **logic** errors are never retried
+blindly — return the message and let the model change its plan instead.
+
+<Callout kind="tip" title="The description is the prompt">
+  Models choose tools almost entirely from names and descriptions; most
+  "the agent called the wrong tool" bugs are documentation bugs. Write
+  descriptions like prompts — what the tool does, what it returns, when
+  *not* to use it — then watch real runs before touching any code.
+</Callout>
+
+## Resources
+
+- [Anthropic — Tool use guide](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview) — the loop above, provider-style.
+- [OpenAI — Function calling](https://platform.openai.com/docs/guides/function-calling) — the same protocol, different spelling.
+- [Pydantic documentation](https://docs.pydantic.dev/latest/) — validation at the boundary.
+
+## Exercise
+
+1. Add a second tool — say, row counts and missing-value shares for a CSV —
+   with a full schema, wire it into `TOOLBOX`, and test triggering.
+2. Wrap execution with the pydantic validator; deliberately steer the agent
+   into bad arguments once and confirm it recovers via the error-as-result
+   path.
+3. Simulate a flaky tool that fails half the time transiently; add capped
+   exponential-backoff retry for that class only and log steps per task.
+   Commit.
+
+<Quiz
+  question="The model returns a request to call convert_currency with arguments. Who actually executes the function?"
+  options={["The model executes it inside its own sandbox", "Your code executes it and returns the result as a tool message", "The API provider executes registered tools server-side", "Nobody does — the model writes the answer from memory"]}
+  answer={1}
+  explanation="Tool calling is a protocol, not remote execution: the model emits a structured request, your code runs the real function, and the result re-enters the conversation for the next model turn."
+/>

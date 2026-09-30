@@ -1,0 +1,130 @@
+---
+day: 25
+title: "PyTorch fundamentals: tensors and autograd"
+phase: 3
+minutes: 90
+objectives:
+  - "Map every NumPy tensor operation you know onto torch tensors"
+  - "Explain what the autograd graph records and what .backward() produces"
+  - "Define an nn.Module and take a complete first training step"
+  - "Place tensors and models correctly on CPU or GPU"
+tags: ["pytorch", "deep-learning", "autograd", "phase-3"]
+---
+
+Days 23 and 24 built a network and its gradients in bare NumPy. PyTorch's
+pitch is simple: keep the NumPy habits, automate the backward pass, and borrow
+a GPU while you are at it. Every remaining day of this phase assumes today's
+vocabulary.
+
+## Tensors: NumPy that can move to the GPU
+
+```python
+import torch
+
+a = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+b = torch.ones(3, 2)
+print((a @ b).shape)            # torch.Size([2, 2]) — same matmul as NumPy
+print(a.sum(), a[1, :2], a.T)   # reductions, indexing, transpose: all familiar
+
+n = torch.from_numpy(a.numpy())         # zero-copy bridge when dtypes allow
+w = torch.randn(3, 3, device="cpu")     # the one new idea: where a tensor lives
+print(w.device)
+```
+
+The API is deliberately NumPy-shaped — same broadcasting, same slicing, same
+reductions. The deltas are the device and what comes next.
+
+## Autograd: the chain rule as a service
+
+```python
+x = torch.randn(4, 3)
+W = torch.randn(3, 2, requires_grad=True)   # track this leaf
+y_hat = (x @ W).tanh()
+loss = y_hat.square().mean()
+
+loss.backward()                # Day 24's reverse pass, automated
+print(W.grad.shape)            # (3, 2) — d loss / d W, same shape as W
+print(x.grad)                  # None — x never asked to be tracked
+```
+
+During the forward pass, every operation on a tracked tensor appends a node to
+a graph. `.backward()` walks that graph in reverse and deposits gradients in
+each leaf's `.grad`. Two habits to internalize now: gradients **accumulate**
+across calls until you zero them, and the graph is freed after `.backward()`
+— recompute the forward pass if you need to differentiate again.
+
+## nn.Module: models as objects
+
+```python
+import torch.nn as nn
+
+class MLP(nn.Module):
+    def __init__(self, d_in, h, d_out):
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Linear(d_in, h), nn.ReLU(), nn.Linear(h, d_out)
+        )
+
+    def forward(self, x):
+        return self.body(x)
+
+model = MLP(3, 16, 2)
+print(sum(p.numel() for p in model.parameters()))   # 98 = 3*16+16 + 16*2+2
+```
+
+`nn.Linear` is Day 23's `X @ W + b`; a module is a named container of tensors
+that know they are parameters. `.parameters()` is the handle the optimizer
+subscribes to, and `numel` counting is how you sanity-check architectures.
+
+## Device placement and the first training step
+
+```python
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = MLP(3, 16, 2).to(device)
+xb = torch.randn(8, 3, device=device)
+yb = torch.randn(8, 2, device=device)
+
+out = model(xb)
+loss = (out - yb).square().mean()
+loss.backward()
+with torch.no_grad():                       # the update is not part of the graph
+    for p in model.parameters():
+        p -= 0.1 * p.grad
+model.zero_grad(set_to_none=True)
+```
+
+Model and batch must live on the same device, and the gradient update runs
+under `no_grad` because it is bookkeeping, not a differentiable operation.
+Tomorrow this step gets wrapped in a real loop with a real optimizer.
+
+<Callout kind="warn" title="The two first-week bugs">
+Forgetting `.to(device)` on either the model or the batch raises a device
+mismatch error — loud, so you will fix it fast. Far sneakier: forgetting to
+zero gradients. They accumulate, every step becomes far too large, and
+training diverges with no error message anywhere. Calling `zero_grad()` before
+every `.backward()` is muscle memory from today onward.
+</Callout>
+
+## Resources
+
+- [PyTorch — Learn the Basics](https://pytorch.org/tutorials/beginner/basics/intro.html) — the official ramp-up track
+- [PyTorch — A 60 Minute Blitz](https://pytorch.org/tutorials/beginner/deep_learning_60min_blitz.html) — tensors, autograd, and a first network
+- [PyTorch — Autograd mechanics](https://pytorch.org/docs/stable/autograd.html) — the gory details, when you need them
+- [Karpathy — The spelled-out intro to neural networks (micrograd)](https://karpathy.ai/zero-to-hero.html) — autograd distilled to about 100 lines
+
+## Exercise
+
+1. Verify the NumPy mirror: build the same random matrices in both libraries,
+   compute `X @ W` in each, and confirm `np.allclose` on the results.
+2. Call `.backward()` twice on a freshly recomputed loss without zeroing and
+   print `W.grad` after each — observe accumulation and explain the shape.
+3. If you have a GPU, move the training step there and time 1,000 steps
+   against CPU (`time.perf_counter`); otherwise write down why the timing
+   would not mean much yet at this model size.
+
+<Quiz
+  question="What does calling loss.backward() twice without zeroing gradients in between do to a leaf's .grad?"
+  options={["It raises an error the second time", "It overwrites the gradient with the new one", "It accumulates — the second call's gradient is added to the first", "It returns None the second time"]}
+  answer={2}
+  explanation="Leaf .grad tensors accumulate across backward calls until you zero them; that is why zero_grad() exists. (Recompute the forward pass first, or the freed graph errors.)"
+/>

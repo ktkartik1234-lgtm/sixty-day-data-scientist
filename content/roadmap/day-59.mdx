@@ -1,0 +1,164 @@
+---
+day: 59
+title: "Deployment and the model card"
+phase: 6
+minutes: 90
+objectives:
+  - "Serialize one sklearn Pipeline artifact that bundles preprocessing and model"
+  - "Serve predictions through FastAPI, containerized with Docker"
+  - "Write smoke tests that fail loudly before anyone else finds the bug"
+  - "Draft the model card: intended use, data, metrics, limitations, ethics"
+tags: ["deployment", "fastapi", "docker", "model-card"]
+blog:
+  - "case-study-financial-stress"
+---
+
+Yesterday produced the final metrics; today produces the *thing* — a running
+endpoint the capstone can link to — plus the document that keeps it honest:
+the case study's definition of done, made concrete.
+
+## One artifact: pipeline in, probability out
+
+The `Pipeline` from Day 57 already fuses preprocessing and model — serialize
+it whole, so serving code can never re-implement (and silently diverge from)
+the training-time transforms:
+
+```python
+import joblib
+from sklearn.pipeline import Pipeline
+
+final = Pipeline([("prep", preprocess), ("clf", models["boosted"])])
+final.fit(X_train_val, y_train_val)            # refit on train + validation
+joblib.dump(final, "models/stress_pipeline_v1.joblib")
+
+loaded = joblib.load("models/stress_pipeline_v1.joblib")
+probs = loaded.predict_proba(X_test)[:, 1]     # sanity: matches Day 58
+```
+
+Version the filename, and record the training row counts and the git commit
+in the model card — `v1` is not the last artifact you will make.
+
+## FastAPI endpoint, again but for real
+
+The Day 51 pattern, now aimed at the capstone model. Pydantic validates the
+request shape before the pipeline ever sees a row:
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+import joblib
+import pandas as pd
+
+app = FastAPI(title="Financial Stress Predictor", version="1.0")
+model = joblib.load("models/stress_pipeline_v1.joblib")
+
+class Customer(BaseModel):
+    ID: str
+    arpu: float
+    age: int
+    segment: str
+    earning_pattern: str
+    # remaining fields follow the data dictionary
+
+@app.post("/predict")
+def predict(c: Customer):
+    X = pd.DataFrame([c.model_dump()]).drop(columns=["ID"])
+    prob = float(model.predict_proba(X)[0, 1])
+    return {"stress_probability": round(prob, 4),
+            "flag": bool(prob >= 0.35)}
+```
+
+Note what the endpoint does *not* do: no retraining, no file writes. Load
+once at startup; transform and predict per request; return a probability.
+
+## Docker and smoke tests
+
+The image answers "works on my machine" — dependencies, code and artifact
+travel together:
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+COPY models/ models/
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Build with `docker build -t stress-api:v1 .`, run with
+`docker run -p 8000:8000 stress-api:v1`. Then smoke-test the *container*,
+not the local process — three flavors, runnable in CI:
+
+```python
+from fastapi.testclient import TestClient
+client = TestClient(app)
+
+def test_response_shape_and_range():
+    r = client.post("/predict", json=SAMPLE_CUSTOMER)
+    assert r.status_code == 200
+    assert 0.0 <= r.json()["stress_probability"] <= 1.0
+
+def test_known_row_matches_offline_value():
+    r = client.post("/predict", json=SAMPLE_CUSTOMER)
+    assert abs(r.json()["stress_probability"] - EXPECTED_PROB) < 0.01
+
+def test_unknown_category_does_not_explode():
+    odd = dict(SAMPLE_CUSTOMER, segment="SEGMENT_X9")
+    assert client.post("/predict", json=odd).status_code == 200
+```
+
+The second test is the important one: it pins the serialized pipeline to the
+metrics you reported, so a refactor that shifts a prediction fails loudly.
+
+## The model card
+
+`models/MODEL_CARD.md` follows the model-card genre: short enough to read
+before trusting the system. Six sections:
+
+- **Model details** — what it predicts, version, training date, git commit.
+- **Intended use** — flagging customers for a wellness outreach call within
+  30 days. **Out of scope:** credit denial, pricing, any adverse action.
+- **Data** — the snapshot definition, the six-month panel, 40,000 customers,
+  15 percent prevalence, and the leakage-audit summary.
+- **Metrics** — PR-AUC and Brier with bootstrap CIs, the chosen threshold
+  with its cost matrix, and the per-slice numbers.
+- **Limitations** — worst cohort slice, drift risk (Day 54), snapshot-era
+  bias, informative missingness.
+- **Ethical considerations** — outreach must help, not pressure; stress
+  prediction on financial data touches privacy and fairness; state who
+  reviews flags and what a customer ever sees.
+
+<Callout kind="warn" title="The artifact you ship is not the notebook">
+  Every serialization boundary is a chance to diverge from training: a
+  hand-copied encoding rule, a classifier loaded without its imputer, an
+  image with a different library version. Bundle everything into one
+  artifact, prove fidelity with a fixed-row smoke test, and write the model
+  card while the decisions are fresh — an undocumented model is a future
+  incident report.
+</Callout>
+
+## Resources
+
+- [scikit-learn — Model persistence](https://scikit-learn.org/stable/model_persistence.html)
+- [FastAPI documentation](https://fastapi.tiangolo.com/)
+- [Docker — Get started](https://docs.docker.com/get-started/)
+- [Mitchell et al. — Model Cards for Model Reporting](https://arxiv.org/abs/1810.03993)
+
+## Exercise
+
+1. Refit the winning pipeline on train plus validation, serialize it, and
+   write a test asserting the loaded artifact reproduces the Day 58 test
+   metrics to three decimals.
+2. Stand up the FastAPI service locally and in Docker; pass all three smoke
+   tests against the container.
+3. Write `MODEL_CARD.md` with all six sections, link it from the README, and
+   commit both alongside the versioned artifact.
+
+<Quiz
+  question="Why serialize the entire sklearn Pipeline (imputer, scaler, encoder and model) instead of saving only the fitted classifier?"
+  options={["Pipelines compress to smaller files", "Serving must apply the identical, train-fitted transforms in the same order, or predictions silently drift", "joblib cannot serialize classifiers alone", "FastAPI refuses plain estimator objects"]}
+  answer={1}
+  explanation="The preprocessing learned statistics on the training data; re-implementing them by hand at serving time is where train/serve skew is born. One bundled artifact keeps served behavior identical to the evaluated behavior."
+/>

@@ -1,0 +1,135 @@
+---
+day: 7
+title: "NumPy deep dive: vectorization and broadcasting"
+phase: 1
+minutes: 75
+objectives:
+  - "Think in axes: reductions along axis 0 and axis 1 without loops"
+  - "Filter and transform arrays with boolean masks"
+  - "Apply the broadcasting rules and predict output shapes"
+  - "Benchmark a loop against its vectorized equivalent"
+tags: ["numpy", "python", "performance"]
+math:
+  - "linear-algebra/vectors-and-matrices"
+---
+
+Days 2–3 taught you what arrays mean; Day 6's simulation ran millions of array
+operations without a single Python loop. Today you learn to *write* code that
+way — it is the single biggest speed and readability upgrade of the phase.
+
+## Axis-wise thinking
+
+`axis` names the dimension that **collapses**. `axis=0` collapses rows and
+leaves one result per column; `axis=1` does the opposite.
+
+```python
+import numpy as np
+
+X = np.arange(12, dtype=float).reshape(4, 3)   # 4 samples, 3 features
+
+X.mean(axis=0)        # per-feature mean, shape (3,)
+X.sum(axis=1)         # per-sample total, shape (4,)
+X.argmax(axis=1)      # best feature per sample, shape (4,)
+```
+
+$$z_{ij} = \frac{x_{ij} - \mu_j}{\sigma_j}$$
+
+Standardizing a dataset is two axis-0 reductions and one subtraction — the
+formula above *is* three vectorized lines.
+
+## Broadcasting: the rules
+
+To combine shapes, compare them **right to left**. Dimensions are compatible
+when they are equal or one of them is 1; missing dimensions count as 1.
+
+- `(4, 3)` with `(3,)` → `(4, 3)`: per-column scaling.
+- `(4, 1)` with `(1, 3)` → `(4, 3)`: outer-product style.
+- `(4, 3)` with `(4,)` → **error**: trailing 3 vs 4 cannot line up.
+
+```python
+mean, std = X.mean(axis=0), X.std(axis=0)
+X_std = (X - mean) / std               # (4,3) - (3,): broadcast across rows
+print(X_std.mean(axis=0))              # [0. 0. 0.]
+
+w = np.array([0.1, 0.3, 0.6])
+weighted = X_std @ w                   # one score per sample
+biases = np.array([[0.0], [1.0], [2.0], [3.0]])    # shape (4,1)
+(X_std + biases)                       # broadcasts down the columns
+```
+
+## Boolean masking: filters without loops
+
+```python
+rng = np.random.default_rng(1)
+s = rng.normal(loc=0.5, scale=0.2, size=1000)
+
+high = s[s > 0.8]                          # keep matching elements
+print((s > 0.8).sum(), (s > 0.8).mean())   # count and proportion in one pass
+s[(s > 0.2) & (s < 0.8)] = 0.5             # note `&`, not `and`
+outliers = np.abs(s - 0.5) > 3 * s.std()
+print(s[outliers][:5])                     # a four-line anomaly detector
+```
+
+Combine conditions with `&`, `|`, `~` and **parentheses** — Python's `and`
+would try to decide a whole array's truthiness and fail.
+
+## np.where and friends
+
+```python
+labels = np.where(s > 0.8, "high", "normal")   # vectorized if/else
+idx = np.where(s > 0.8)[0]                     # or just the indices
+clipped = np.clip(s, 0.0, 0.95)                # hard floor and ceiling
+print(labels[:8], clipped.min(), clipped.max())
+```
+
+## Benchmark: why loops die
+
+```python
+import time
+
+x = np.random.default_rng(2).random(1_000_000)
+
+start = time.perf_counter()
+total = 0.0
+for v in x:
+    total += v * 2.0 + 1.0
+loop_s = time.perf_counter() - start
+
+start = time.perf_counter()
+vec_total = (x * 2.0 + 1.0).sum()
+vec_s = time.perf_counter() - start
+
+print(f"loop       : {loop_s:.4f} s")
+print(f"vectorized : {vec_s:.6f} s  (about {loop_s / vec_s:,.0f}x faster)")
+```
+
+<Callout kind="deep" title="Vectorization is expressiveness, not just speed">
+  NumPy pushes the loop into compiled C, but the deeper win is what becomes
+  sayable: Day 9's entire gradient computation — `X.T @ (X @ w - y) / n` — is
+  a forward pass, a residual, and a backward pass in one line. Loops force
+  you to track individual numbers; vectorized code lets you state the math.
+</Callout>
+
+## Resources
+
+- [NumPy broadcasting docs](https://numpy.org/doc/stable/user/basics.broadcasting.html) — the rules, straight from the source.
+- [100 NumPy exercises](https://github.com/rougier/numpy-100) — Rougier's classic drill set; do the broadcasting and masking ones.
+- [SciPy Lectures, NumPy chapter](https://scipy-lectures.org/intro/numpy/index.html) — arrays, operations and broadcasting with figures.
+
+## Exercise
+
+1. Standardize a `(100, 5)` random matrix per column without loops; verify
+   every column of the result has mean near 0 and standard deviation near 1.
+2. Kill this loop with one vectorized line: given prices `p` and threshold
+   `t`, compute `total`, which adds `2*v - 1` for each price above `t`
+   (translate the loop to a mask times a vector, then sum).
+3. Benchmark three row-wise max implementations — a Python loop, a list
+   comprehension, and `arr.max(axis=1)` — on a `(10_000, 100)` array and
+   record the three timings. Commit the notebook.
+
+<Quiz
+  question="What happens with a of shape (4, 3) plus b of shape (4,)?"
+  options={["It broadcasts row-wise to shape (4, 3)", "ValueError: the trailing dimensions 3 and 4 are incompatible", "It returns shape (3, 3)", "It returns shape (4, 4)"]}
+  answer={1}
+  explanation="Broadcasting compares shapes right to left: 3 and 4 match nothing and neither is 1, so NumPy raises an error instead of guessing. Adding a (4, 1) column vector would broadcast fine."
+/>

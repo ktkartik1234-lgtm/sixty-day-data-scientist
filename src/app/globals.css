@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-ink-950 text-zinc-300 antialiased;
+}
+
+/* keep KaTeX from overflowing on small screens */
+.katex-display {
+  @apply overflow-x-auto overflow-y-hidden py-1;
+}
+
+::selection {
+  @apply bg-accent-600/50 text-white;
+}

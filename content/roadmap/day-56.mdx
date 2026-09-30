@@ -1,0 +1,150 @@
+---
+day: 56
+title: "Capstone EDA and data quality audit"
+phase: 6
+minutes: 90
+objectives:
+  - "Tour the dataset systematically: shape, types, missingness, duplicates"
+  - "Quantify target balance and per-feature relationships with the target"
+  - "Complete a leakage-suspects worksheet with a verdict for every row"
+  - "Document every EDA decision so the notebook tells the whole story"
+tags: ["eda", "data-quality", "capstone", "pandas"]
+math:
+  - "statistics/correlation-vs-causation"
+---
+
+Yesterday you signed the framing contract; today you audit the data that
+contract describes. The five-beat inspection rhythm from Day 1 — shape,
+dtypes, missing, summary, peek — now runs at capstone scale: roughly 40,000
+rows, 184 columns, and one question behind every step: *can this column be
+believed?*
+
+## The systematic tour
+
+Run the same report on Train and Test before any plotting:
+
+```python
+import pandas as pd
+
+train = pd.read_csv("../data/Train.csv")
+test = pd.read_csv("../data/Test.csv")
+
+def dataset_report(df: pd.DataFrame, name: str) -> None:
+    print(f"== {name} ==")
+    print("shape:", df.shape)
+    print("duplicate IDs:", df["ID"].duplicated().sum())
+    missing = df.isna().mean().mul(100).sort_values(ascending=False)
+    print("columns with any missing:", int((missing > 0).sum()))
+    print(missing[missing > 0].head(8))
+    constants = [c for c in df.columns if df[c].nunique() <= 1]
+    print("constant columns:", constants)
+    print("dtypes:", df.dtypes.value_counts().to_dict())
+
+dataset_report(train, "train")
+dataset_report(test, "test")
+```
+
+Then reconcile the two files: the test set carries every training column
+except the target, and every train-time decision — imputation values, category
+vocabularies — must transfer to test without surprises. This tour is what
+catches a constant column or an unseen region before it becomes a serving bug.
+
+## Target balance sets the bar
+
+```python
+y = train["liquidity_stress_next_30d"]
+prevalence = y.mean()
+print(f"positive rate: {prevalence:.1%}")
+```
+
+About 15 percent of customers experience stress. Two consequences. First,
+the random-guess bar for your headline metric is not 0.5 but the prevalence
+itself:
+
+$$\mathrm{PR\text{-}AUC}_{\text{random}} = \pi \approx 0.15$$
+
+so a PR-AUC of 0.30 already contains real signal, and 0.45 would be strong.
+Second, accuracy is dead as a metric — predicting "no stress" for everyone
+scores about 85 percent. Log both numbers in the notebook; they are the
+reference lines every model this week is measured against.
+
+## Per-feature versus the target
+
+Two sweeps: numeric features compared by class mean, categoricals compared
+by stress rate.
+
+```python
+target = "liquidity_stress_next_30d"
+num_cols = [c for c in train.select_dtypes("number").columns if c != target]
+
+by_class = train.groupby(target)[num_cols].mean().T
+by_class["delta"] = by_class[1] - by_class[0]
+print(by_class["delta"].abs().sort_values(ascending=False).head(10))
+
+for col in ["segment", "earning_pattern", "smartphone", "gender"]:
+    rates = train.groupby(col)[target].mean()
+    print(col, (rates * 100).round(1).sort_values(ascending=False).to_dict())
+```
+
+The first sweep surfaces which behaviours move most between stressed and calm
+customers — expect balance levels and withdrawal patterns near the top. The
+second shows, for instance, whether stress rates differ by earning pattern.
+When you write these findings up, keep the statistics track's
+correlation-versus-causation distinction in view. The sample correlation
+between two variables $x$ and $y$,
+
+$$r_{xy} = \frac{\sum_i (x_i - \bar{x})(y_i - \bar{y})}{\sqrt{\sum_i (x_i - \bar{x})^2 \, \sum_i (y_i - \bar{y})^2}},$$
+
+measures co-movement and nothing more. A group-mean gap does not license
+"low balances cause stress" — a third factor, such as irregular income, may
+drive both. EDA generates hypotheses; only the framing document decides what
+the model is allowed to claim.
+
+## The leakage-suspects worksheet
+
+Create `notebooks/01_leakage_audit.ipynb` and fill a literal table — this is
+the deliverable of the day:
+
+| Suspect | Why it is suspect | Verdict | Evidence |
+| --- | --- | --- | --- |
+| `ID` inside the feature matrix | An identifier can memorize split structure | Drop from features | Dictionary: used for submission matching only |
+| `x_90_d_activity_rate` | A 90-day window could overlap the outcome window | Investigate | Dictionary: last 90 days before the snapshot — keep |
+| Any single feature with AUC above 0.95 | Outcome in disguise | Drop after scan | Day 55 scan output, listed by name |
+| Train and Test column mismatch | Silent failure at serving time | Verified aligned | Difference of column sets equals the target alone |
+| Duplicated rows across files | Group leakage between train and test | None found | `ID` uniqueness check from the tour |
+
+Every row needs an evidence entry pointing at actual printed output — "looks
+fine" is not a verdict.
+
+<Callout kind="tip" title="Document decisions, not just outputs">
+  The difference between a notebook and an audit trail is a markdown cell
+  beside every finding: what you saw, what you decided, why. In six days a
+  stranger — an interviewer, or you, exhausted — must be able to reconstruct
+  the reasoning without re-deriving it. Decide once, write it down, and never
+  re-litigate the same question at midnight on Day 58.
+</Callout>
+
+## Resources
+
+- [pandas — Working with missing data](https://pandas.pydata.org/docs/user_guide/missing_data.html)
+- [pandas — Group by: split-apply-combine](https://pandas.pydata.org/docs/user_guide/groupby.html)
+- [Python Data Science Handbook (free, online)](https://jakevdp.github.io/PythonDataScienceHandbook/) — the pandas and visualization chapters.
+
+## Exercise
+
+1. Run the systematic tour on both files and log at least three data-quality
+   findings — missing columns, constants, type oddities — as markdown cells
+   with the code that produced them directly above.
+2. Complete the leakage-suspects worksheet with at least six rows, each
+   verdict backed by printed output; include the Day 55 single-feature AUC
+   scan as one row of evidence.
+3. Plot the stress rate by `earning_pattern` and by balance quartile. Write
+   one causal-sounding sentence the plots tempt you toward, then rewrite it
+   as the correlational claim the data actually supports.
+
+<Quiz
+  question="EDA shows customers with missing behaviour columns are much more likely to be stressed. The best first move is to…"
+  options={["Drop every row that contains a missing value", "Treat missingness as information: add an indicator and keep the rows", "Fill all missing values with the column mean and mention it nowhere", "Remove the missing rows from the test set only"]}
+  answer={1}
+  explanation="When missingness correlates with the target, dropping rows discards signal and biases the sample. An indicator (or an encoding that keeps missingness explicit) lets the model use it — with the imputation living inside the pipeline, not applied ad hoc."
+/>

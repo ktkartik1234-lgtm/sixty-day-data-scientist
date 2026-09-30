@@ -1,0 +1,152 @@
+---
+title: "Correlation vs causation"
+summary: "What Pearson's r measures, what it refuses to say, confounders, Simpson's paradox — and why randomized A/B tests remain the only escape hatch."
+order: 4
+---
+
+Correlation is the cheapest signal in data science: one line of NumPy gives
+you a number between -1 and 1 describing how two variables move together.
+The expensive lesson is what that number does *not* say — and how much
+engineering effort, from randomized experiments to careful feature selection,
+exists to compensate for exactly that gap.
+
+## Pearson correlation
+
+For paired observations $(x_i, y_i)$, the Pearson correlation coefficient is
+the covariance of $x$ and $y$, normalized by both standard deviations:
+
+$$r = \frac{\sum_{i=1}^{n}(x_i - \bar{x})(y_i - \bar{y})}
+{\sqrt{\textstyle\sum_{i=1}^{n}(x_i - \bar{x})^2}\,\sqrt{\textstyle\sum_{i=1}^{n}(y_i - \bar{y})^2}}
+= \frac{\widehat{\text{cov}}(x, y)}{s_x \, s_y}$$
+
+Facts worth memorizing: $r \in [-1, 1]$; $|r| = 1$ means the points lie
+exactly on a straight line; $r = 0$ means *no linear association* — which is
+not the same as "no relationship" (a perfect $y = x^2$ arc scores near zero).
+And $r$ is famously fragile: a single extreme outlier can move it
+dramatically in either direction. For simple linear regression there is a
+tidy identity: $r^2 = R^2$, the fraction of variance the line explains.
+
+## What correlation does not say
+
+Correlation is symmetric and silent about mechanism. $r \approx 0.9$ between
+ice cream sales and drowning deaths does not mean ice cream is dangerous; it
+means both rise together. Four different worlds produce identical
+correlations:
+
+1. $x$ causes $y$;
+2. $y$ causes $x$ (reverse causation — think firefighting crews vs fire damage);
+3. a third variable $z$ causes both (a **confounder**);
+4. pure coincidence, especially in small samples.
+
+The correlation coefficient cannot distinguish among them. Only information
+from outside the dataset — how the data was generated — can.
+
+## Confounders
+
+A **confounder** is a variable that influences both the feature and the
+target, manufacturing an association between two things that have no direct
+link. Weather drives both ice cream sales and swimming; both drive the
+correlation. Classic ML examples: hospital patients look sicker than healthy
+people *despite* treatment (only sick people get treated), and in hiring
+data, neighborhood zip codes correlate with outcomes only through wealth and
+opportunity they proxy. Confounding is why observational correlations
+routinely evaporate — or reverse — under scrutiny.
+
+## Simpson's paradox
+
+The sharpest warning: an association can **reverse** when you split the data
+by a hidden group variable. Here is a job-training program evaluated on
+400 people:
+
+| Group | Enrolled | Not enrolled |
+|---|---|---|
+| Low-skill participants | 40/160 employed (25%) | 8/40 employed (20%) |
+| High-skill participants | 36/40 employed (90%) | 128/160 employed (80%) |
+| **Overall** | **76/200 (38%)** | **136/200 (68%)** |
+
+Read the bottom row and the program looks harmful: enrollees are employed at
+38% versus 68%. Read the strata and the program helps *twice over* — better
+outcomes for both low-skill (25% vs 20%) and high-skill (90% vs 80%)
+participants. The reversal happens because enrollment and employment share a
+confounder: the enrolled group is dominated by low-skill participants (160
+of 200), while the non-enrolled group is dominated by high-skill participants
+(160 of 200) — and skill level alone drives employment either way. The
+overall rates compare two different populations, not two treatments.
+
+## Why randomized experiments win
+
+Randomization severs the confounder's grip. In an A/B test, the coin flip
+that assigns each user to treatment or control is — by construction —
+independent of age, intent, device, and every hidden variable. Any
+confounder gets balanced across groups in expectation, so a significant
+difference in outcomes measures the treatment's causal effect, not the
+groups' pre-existing differences. This is why the experiment is the gold
+standard, and why the t-test and CLT machinery from earlier in this track
+exist: they quantify whether a randomized difference exceeds noise.
+
+Observational data (no coin flip) demands humility instead:
+
+- **Feature selection is not causal analysis.** A feature with high
+  correlation to the target can be pure confounding proxy — useful for
+  *prediction*, meaningless as a *lever*. A model may legitimately use a
+  zip code to predict default while the company must never act on it.
+- **Control where you can:** stratify, match, or include confounders as
+  covariates — and know that regression adjustment fixes only the
+  confounders you thought of.
+- **Beware post-treatment bias:** dropping or controlling for variables
+  downstream of the treatment can erase the very effect you seek.
+
+<Callout kind="warn" title="Connection to ML">
+  A feature-selection pipeline that ranks features by correlation will
+  happily promote confounded proxies — and a model trained on them will
+  learn the world as it was, not the effect of changing it. Prediction and
+  intervention are different questions; correlation answers the first,
+  randomization answers the second.
+</Callout>
+
+## Resources
+
+- [xkcd 552 — Correlation](https://xkcd.com/552/) — the entire lesson in one comic.
+- [Seeing Theory — Regression Analysis](https://seeing-theory.brown.edu/regression-analysis/index.html) — interactive correlation and regression.
+- [Khan Academy — Describing relationships in quantitative data](https://www.khanacademy.org/math/statistics-probability/describing-relationships-quantitative-data) — scatterplots, r, and residual drills.
+- [OpenIntro Statistics](https://www.openintro.org/book/os/) — chapter 8 on regression, including confounding and Simpson's paradox.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  Your team observes that users who enable two-factor authentication are
+  three times less likely to be hacked, and proposes forcing it on everyone.
+  Before running that experiment, show with a small two-by-two table how a
+  confounder (security-mindedness) could produce this correlation with
+  no causal effect of 2FA at all.
+</Callout>
+
+<Solution>
+  Suppose security-minded users are far likelier to enable 2FA **and** far
+  likelier to avoid risky links and reuse passwords — which alone prevents
+  hacks. Split 1,000 users by mindset; hacked rates by cell:
+
+  | Mindset | 2FA on | 2FA off |
+  |---|---|---|
+  | Security-minded | 6 of 300 hacked (2%) | 2 of 100 hacked (2%) |
+  | Casual | 40 of 100 hacked (40%) | 200 of 500 hacked (40%) |
+  | **Overall** | **46 of 400 (11.5%)** | **202 of 600 (33.7%)** |
+
+  The bottom row reproduces the observed story: 2FA users are hacked at
+  11.5% versus 33.7% — roughly three times less likely. But within *each*
+  mindset class the hacked rate is exactly equal (2% and 2%, 40% and 40%):
+  2FA itself changes nothing.
+
+  The correlation exists only because 2FA adoption is concentrated among
+  security-minded users (300 of 400, versus 100 of 600), and mindset alone
+  protects them. Forcing 2FA on everyone would change nothing — a randomized
+  rollout would have exposed this immediately, while the observational
+  correlation confidently recommends a useless policy.
+</Solution>
+
+<Quiz
+  question="Ice cream sales correlate strongly with drowning deaths. The most likely explanation is..."
+  options={["Ice cream causes drowning", "Drowning increases ice cream demand", "A confounder — hot weather — causes both swimming and ice cream purchases", "The correlation must be a data-entry error"]}
+  answer={2}
+  explanation="Hot weather drives both swimming (hence drownings) and ice cream purchases. The variable-to-variable link is real but routed through a common cause — exactly what correlation alone cannot untangle."
+/>

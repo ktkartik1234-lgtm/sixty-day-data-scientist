@@ -1,0 +1,113 @@
+---
+day: 30
+title: "Sequence models: RNNs, LSTMs and why attention won"
+phase: 3
+minutes: 90
+objectives:
+  - "Explain recurrence: one hidden state carried across timesteps"
+  - "Connect BPTT to Day 24's backprop on an unrolled, weight-tied graph"
+  - "Diagnose vanishing gradients and how LSTM gating fights them"
+  - "State the limitations that made attention the successor"
+tags: ["deep-learning", "rnn", "lstm", "sequences", "phase-3"]
+---
+
+Nine days of models that consume fixed-size inputs — vectors, grids, images.
+Today the input is a sequence: order carries meaning, length is unbounded, and
+"dog bites man" is not "man bites dog".
+
+## Sequences break the fixed-size assumption
+
+Sliding fixed windows lose long context, and bag-of-words discards the order
+that is often the entire message. The classical answer: process one token at a
+time and carry a **hidden state** forward:
+
+$$h_t = \tanh(W_h h_{t-1} + W_x x_t + b)$$
+
+The same $W_h$ and $W_x$ act at every step — weights tied across time — and
+$h_t$ is a lossy running summary of everything seen so far.
+
+## BPTT is Day 24, unrolled
+
+Unroll the recurrence across timesteps and you get a very deep computational
+graph in which the same weights appear at every level. Backpropagation through
+time (BPTT) is ordinary backprop on that unrolled graph — no new algorithm.
+But depth plus weight tying creates a product: the gradient from timestep $T$
+back to timestep 1 passes through $T$ factors of the recurrent Jacobian, each
+capped by the tanh derivative:
+
+```python
+import numpy as np
+
+z = np.linspace(-3, 3, 7)
+print((1 - np.tanh(z) ** 2).round(3))
+# [0.01  0.071 0.42  1.    0.42  0.071 0.01] — almost always well below 1
+```
+
+Multiply fifty such factors and the gradient is dust: **vanishing gradients** —
+the network cannot learn dependencies more than a few steps back. (The
+opposite failure, exploding gradients, has a cheap fix: clip them.)
+
+## LSTM: gates as a gradient highway
+
+The Long Short-Term Memory cell adds a memory cell $c_t$ with a near-identity
+path through time, controlled by learned gates:
+
+$$f_t = \sigma(W_f [h_{t-1}, x_t] + b_f) \qquad c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t \qquad h_t = o_t \odot \tanh(c_t)$$
+
+The forget gate $f_t$ decides what to keep, the input gate $i_t$ what to
+write, the output gate $o_t$ what to expose. When $f_t$ is near one, gradients
+flow through $c_{t-1}$ almost untouched — the highway that lets LSTMs hold
+context for hundreds of steps, and the reason they ruled sequence modeling for
+two decades.
+
+```python
+import torch.nn as nn
+
+lstm = nn.LSTM(input_size=16, hidden_size=32, num_layers=2, batch_first=True)
+x = torch.randn(8, 20, 16)              # (batch, time, features)
+out, (h_n, c_n) = lstm(x)
+print(out.shape)                        # (8, 20, 32): one state per timestep
+```
+
+## The limits that crowned attention
+
+Three structural costs remained. **Sequential dependence**: step $t$ cannot
+start before step $t-1$ finishes, so there is no parallelism across time and
+GPUs idle. **Path length**: information from token 1 reaches token 100 only
+through ninety-nine compressions. **Fixed-size bottleneck**: everything must
+fit in one vector $h_t$. The fix is radical: delete the recurrence and let
+every position look directly at every other position, weighted by relevance
+computed from the content itself. That is attention — tomorrow's entire
+agenda.
+
+<Callout kind="deep" title="Nothing new under the sun">
+Unrolled, an RNN is exactly the Day 23–24 feedforward graph with weights tied
+across depth, and BPTT is backprop, full stop. The LSTM's contribution is not
+a new learning rule but an architectural bias — a protected identity path for
+the gradient. You have now seen that idea twice: ResNet's shortcuts on Day 28
+and LSTM's cell state today. The Transformer is the third and most extreme
+version.
+</Callout>
+
+## Resources
+
+- [colah — Understanding LSTM Networks](https://colah.github.io/posts/2015-08-Understanding-LSTMs/) — the diagrams every later paper references
+- [Karpathy — The Unreasonable Effectiveness of Recurrent Neural Networks](https://karpathy.github.io/2015/05/21/rnn-effectiveness/) — char-RNN magic, 2015 style
+- [PyTorch — Recurrent layers](https://pytorch.org/docs/stable/nn.html#recurrent-layers) — RNN, LSTM, GRU APIs and shapes
+
+## Exercise
+
+1. Train `nn.RNN` and `nn.LSTM` side by side on a synthetic remember-the-first-
+   element task (predict the sign of the first element of a length-50
+   sequence) and contrast final accuracy.
+2. Compute the product of 50 random tanh-derivative factors in NumPy and print
+   it; connect that number to BPTT in one sentence.
+3. Re-run the RNN with `torch.nn.utils.clip_grad_norm_` at 1.0 and note what
+   changes; commit the notebook.
+
+<Quiz
+  question="What is the root cause of vanishing gradients in a vanilla RNN?"
+  options={["The learning rate is too high", "The gradient is clipped at every timestep", "Backprop multiplies the same shrinking Jacobian factors across many timesteps, so gradients decay exponentially with distance", "Hidden states are too large to store gradients"]}
+  answer={2}
+  explanation="Because weights are tied across time, the backward pass multiplies the same recurrent Jacobian (with tanh derivatives at most 1) once per timestep — a long product of numbers below 1 collapses toward zero."
+/>

@@ -1,0 +1,129 @@
+---
+day: 19
+title: "Cross-validation and honest evaluation"
+phase: 2
+minutes: 90
+objectives:
+  - "Split train, validation and test — and touch the test set exactly once"
+  - "Score models with stratified k-fold and repeated cross-validation"
+  - "Build leakage-safe Pipelines that fit preprocessing inside each fold"
+  - "Put a bootstrap confidence interval on a metric"
+tags: ["evaluation", "cross-validation", "sklearn"]
+math:
+  - "statistics/confidence-intervals"
+---
+
+Yesterday you squeezed out accuracy. Today's question is harder: can you
+trust the number you measured? Every leaderboard embarrassment and every
+"works in the notebook, dies in production" story is an evaluation failure —
+and **confidence intervals** are how you put honest error bars on scores.
+
+## Three splits, one discipline
+
+Train to fit, validation to choose, test to judge — and the test set is spent
+in a single act at the very end:
+
+```python
+from sklearn.model_selection import train_test_split
+
+X_tr, X_test, y_tr, y_test = train_test_split(
+    X, y, test_size=0.15, stratify=y, random_state=0)
+X_fit, X_val, y_fit, y_val = train_test_split(
+    X_tr, y_tr, test_size=0.2, stratify=y_tr, random_state=0)
+```
+
+Cross-validation replaces the single validation split with several, so no
+lucky slice decides your hyperparameters.
+
+## k-fold and stratified k-fold
+
+Split the training data into k folds; train k models, each holding out a
+different fold; average the k scores. With imbalanced classes, plain k-fold
+can leave a fold with almost no positives — **stratified** k-fold preserves
+the class ratio in every fold:
+
+```python
+from sklearn.model_selection import cross_val_score, RepeatedStratifiedKFold
+
+cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=0)
+scores = cross_val_score(model, X_tr, y_tr, scoring="roc_auc", cv=cv, n_jobs=-1)
+print(scores.mean().round(4), "+/-", scores.std().round(4))
+```
+
+Repeating 5-fold five times costs 25 fits and gives you a distribution of
+fold scores — the raw material for error bars.
+
+## Leakage-safe Pipelines
+
+The most common silent bug: fit the imputer or scaler on *all* the data,
+then cross-validate the model. Every fold's validation rows have already
+contributed to the preprocessing statistics — small leak per fold, big lie
+in total. The fix is structural, not vigilance: put preprocessing *inside*
+the pipeline and sklearn refits it within each fold automatically:
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+
+pipe = Pipeline([
+    ("impute", SimpleImputer(strategy="median")),
+    ("scale", StandardScaler()),
+    ("model", LogisticRegression(max_iter=1000)),
+])
+scores = cross_val_score(pipe, X_tr, y_tr, scoring="roc_auc", cv=cv, n_jobs=-1)
+```
+
+From today on, a model without its preprocessing pipeline does not exist.
+
+## How wide is the error bar?
+
+Fold means vary; a 95 percent bootstrap CI says how much. Resample the fold
+scores with replacement many times and read percentiles:
+
+```python
+def bootstrap_ci(scores, n_boot=10_000, seed=0):
+    rng = np.random.default_rng(seed)
+    stats = [np.mean(rng.choice(scores, len(scores), replace=True))
+             for _ in range(n_boot)]
+    return np.percentile(stats, [2.5, 97.5])
+
+lo, hi = bootstrap_ci(scores)
+print(f"95% CI: [{lo:.4f}, {hi:.4f}]")
+```
+
+If two models' CIs overlap heavily, you have no evidence one is better —
+and "no evidence" is a finding you can defend.
+
+<Callout kind="warn" title="The test set is a one-shot instrument">
+  Every time you peek at test performance, tweak something, and peek again,
+  you are fitting to the test set — the number stops measuring generalization
+  and starts measuring your persistence. Lock the test set away until the
+  final model is frozen, evaluate exactly once, and let validation or
+  cross-validation absorb every decision along the way.
+</Callout>
+
+## Resources
+
+- [scikit-learn — cross-validation guide](https://scikit-learn.org/stable/modules/cross_validation.html)
+- [scikit-learn — pipelines and composite estimators](https://scikit-learn.org/stable/modules/compose.html)
+- [StatQuest — Cross-Validation](https://www.youtube.com/watch?v=fSytzGwwBVw)
+
+## Exercise
+
+1. Split the capstone data into train, validation and test with
+   stratification and a fixed seed; freeze the test indices in a file and
+   commit it.
+2. Wrap imputation, scaling and logistic regression in a Pipeline; score with
+   5-fold, 5-repeat stratified CV; report mean, standard deviation and a
+   bootstrap 95% CI.
+3. Deliberately fit the imputer on all training data *before* CV and compare
+   the (inflated) score to the pipeline's; write one sentence on the size of
+   the gap; commit.
+
+<Quiz
+  question="You try 50 hyperparameter settings and report the best test score. Why is that number optimistic?"
+  options={["It is not — test sets are always unbiased", "Selecting on the test set makes it part of model selection, so the score no longer measures generalization", "Only because 50 is too small a number of tries", "Only if the data was not shuffled before splitting"]}
+  answer={1}
+  explanation="The moment the test set influences any choice — even which model to keep — it stops being untouched evidence. The reported best-of-50 is inflated by exactly the noise you exploited. The test set spends its one shot on the final frozen model."
+/>

@@ -1,0 +1,126 @@
+---
+day: 33
+title: "Tokenization and embeddings"
+phase: 3
+minutes: 75
+objectives:
+  - "Explain BPE: merge frequent pairs until a vocabulary budget is met"
+  - "Show that embedding lookup is one-hot times a matrix, i.e. row indexing"
+  - "Build a cosine-similarity retrieval demo in NumPy"
+tags: ["nlp", "embeddings", "tokenization", "phase-3"]
+math:
+  - "linear-algebra/vectors-and-matrices"
+---
+
+Yesterday's tokenizer was a black box between text and ids. Today you open it,
+and then follow the ids to where they land: Day 2's
+**[vectors and matrices](/math/linear-algebra/vectors-and-matrices)** return as
+the geometry of meaning.
+
+## BPE: a vocabulary built by compression
+
+Character-level vocabularies are tiny but make sequences enormous; word-level
+vocabularies explode and choke on unseen words. Byte-pair encoding (BPE)
+starts from characters and repeatedly merges the most frequent adjacent pair
+until the vocabulary budget is met:
+
+```python
+from transformers import AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained("gpt2")
+for word in ["unbelievable", "tokenization", "embeddings", "transformers"]:
+    print(word, "->", tok.tokenize(word))
+# expect 2-4 subword pieces per word: frequent chunks survive as single
+# tokens, rare words are spelled out of reusable pieces
+```
+
+The result: common words get their own tokens, everything else decomposes into
+frequent fragments, and no input is ever out-of-vocabulary. The vocabulary
+size (how many merges) is a real trade-off: bigger means shorter sequences
+but larger embedding tables.
+
+## Embedding lookup is matrix indexing
+
+Give every token id $t \in \{0, \dots, V-1\}$ a learned vector through an
+embedding matrix:
+
+$$E \in \mathbb{R}^{V \times d}, \qquad x_t = o_t^\top E$$
+
+where $o_t$ is the one-hot vector for token $t$. Multiply it out: a one-hot
+times a matrix selects exactly row $t$. That is all an `nn.Embedding` layer
+is — a $V \times d$ matrix plus row selection:
+
+```python
+import numpy as np
+import torch.nn as nn
+
+emb = nn.Embedding(num_embeddings=1000, embedding_dim=64)
+x = emb(torch.tensor([42]))
+print(x.shape)                            # (1, 64)
+
+E = emb.weight.detach().numpy()
+one_hot = np.zeros(1000); one_hot[42] = 1.0
+print(np.allclose(one_hot @ E, E[42]))    # True — lookup IS matrix indexing
+```
+
+"Training embeddings" is gradient descent updating rows of $E$ — Day 24's
+machinery applied to a lookup table.
+
+## Cosine similarity retrieval in NumPy
+
+Day 2's cosine similarity now measures meaning: when embedding training works,
+tokens used in similar contexts sit in similar directions.
+
+```python
+E = np.random.default_rng(0).normal(size=(6, 8))
+E = E / np.linalg.norm(E, axis=1, keepdims=True)    # rows to unit length
+
+query = E[2]                          # pretend token 2 is the query
+sims = E @ query                      # cosine similarity against every row
+top = np.argsort(sims)[::-1][:3]
+print(top, sims[top].round(3))        # 3 nearest rows (first is the query itself)
+```
+
+Swap the random matrix for real pretrained embeddings and this ten-line loop
+becomes semantic search, duplicate detection, and the retrieval half of RAG —
+all of it Day 2 dot products under the hood.
+
+## Where the geometry comes from
+
+Nobody labels "king is near queen". The signal is distributional: tokens
+appearing in similar contexts get pushed together by gradient descent —
+word2vec's skip-gram was the classic explicit version, and inside transformers
+the embedding table co-trains with everything else. Analogies fall out as
+vector arithmetic because the offsets between related words repeat across the
+space.
+
+<Callout kind="deep" title="The matrix is the model's dictionary">
+Every id the tokenizer emits indexes a row of $E$; the meaning of token 4642
+is literally "whatever 768 numbers row 4642 has drifted to during training".
+This is why tokenizer and embedding table must agree — Day 32's warning made
+concrete — and why Day 2's linear algebra never went away: retrieval, RAG and
+LoRA's low-rank updates (Day 40) are all operations on matrices shaped exactly
+like this one.
+</Callout>
+
+## Resources
+
+- [Jay Alammar — The Illustrated Word2Vec](https://jalammar.github.io/illustrated-word2vec/) — how distributional signal becomes geometry
+- [Hugging Face — Summary of the tokenizers](https://huggingface.co/docs/transformers/tokenizer_summary)
+- [Karpathy — Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE) — BPE implemented from scratch
+
+## Exercise
+
+1. Tokenize ten tricky inputs — numbers, code, an emoji, a non-English word —
+   with the `gpt2` tokenizer and note how each decomposes.
+2. Replace the random $E$ with real pretrained embeddings and check whether
+   "cat" lands closer to "dog" than to "car" under cosine similarity.
+3. Prove the math: confirm `nn.Embedding`'s forward equals one-hot times
+   weight for five random ids, and commit the notebook.
+
+<Quiz
+  question="An nn.Embedding(V, d) layer, given id t, returns what?"
+  options={["A random vector resampled on each forward pass", "The one-hot vector of length V", "Row t of its weight matrix — equivalent to multiplying the one-hot vector of t by the matrix", "The average of all embedding vectors"]}
+  answer={2}
+  explanation="The layer is a V-by-d matrix; the forward pass selects row t. Writing it as a one-hot times the matrix shows why it is just linear algebra — and why lookup is fast."
+/>

@@ -1,0 +1,71 @@
+---
+title: "Bayes' rule and conditional probability"
+summary: "How evidence updates belief — the single most reused formula in machine learning, from spam filters to diffusion models."
+order: 1
+---
+
+## Conditional probability
+
+The probability of $A$ given that $B$ happened:
+
+$$P(A \mid B) = \frac{P(A \cap B)}{P(B)}$$
+
+Everything downstream — precision, recall, likelihoods — is conditional
+probability wearing different clothes.
+
+## Bayes' rule
+
+$$P(H \mid E) = \frac{P(E \mid H) \, P(H)}{P(E)}$$
+
+| Term | Name | In ML terms |
+|---|---|---|
+| $P(H \mid E)$ | Posterior | what the model predicts after seeing data |
+| $P(E \mid H)$ | Likelihood | how well the hypothesis explains the data |
+| $P(H)$ | Prior | what we believed before the data |
+| $P(E)$ | Evidence | a normalizing constant |
+
+<Callout kind="tip" title="Intuition">
+  Bayes' rule is belief accounting: start from a prior, let the likelihood
+  push you toward or away from the hypothesis, land on a posterior. Naive
+  Bayes classifiers apply it directly; maximum-likelihood training is the
+  special case of a flat prior.
+</Callout>
+
+## The base-rate trap
+
+A test detects a disease affecting 1% of a population with 90% sensitivity and
+a 5% false-positive rate. What is $P(\text{disease} \mid \text{positive})$?
+
+$$P(D \mid +) = \frac{0.9 \times 0.01}{0.9 \times 0.01 + 0.05 \times 0.99} \approx 0.154$$
+
+Only ~15%. The tiny prior dominates — and this exact trap reappears whenever
+you evaluate a classifier on imbalanced data (capstone days 55–60).
+
+## Resources
+
+- [3Blue1Brown — Bayes theorem](https://www.3blue1brown.com/lessons/bayes-theorem) — the visual derivation.
+- [StatQuest — Bayes' Theorem](https://www.youtube.com/watch?v=H_GZb2S69Ls) — five-minute refresher.
+- [Seeing Theory](https://seeing-theory.brown.edu/) — Brown University's interactive probability book.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  A spam filter flags messages containing the word "free". 40% of spam contains
+  it, 2% of ham does, and 30% of your inbox is spam. Compute the probability a
+  flagged message is spam.
+</Callout>
+
+<Solution>
+  $$P(\text{spam} \mid \text{free}) = \frac{0.4 \times 0.3}{0.4 \times 0.3 + 0.02 \times 0.7} = \frac{0.12}{0.134} \approx 0.896$$
+
+  About 90% — the 20:1 likelihood ratio overwhelms the roughly 2:1 prior.
+  Notice how the answer changes if spam drops to 5% of the inbox: the posterior
+  falls to ≈65%. Priors always matter.
+</Solution>
+
+<Quiz
+  question="A classifier flags fraud with 99% accuracy on data where fraud is 0.1% of cases. What's the best first response?"
+  options={["Deploy it — 99% accuracy is excellent", "Check precision/recall on the positive class; accuracy is dominated by the majority class", "Increase the test set size", "Switch to a neural network"]}
+  answer={1}
+  explanation="On 0.1% prevalence, predicting 'not fraud' always scores 99.9% accuracy. Precision–recall and the base-rate reasoning from Bayes' rule are the tools that expose this."
+/>

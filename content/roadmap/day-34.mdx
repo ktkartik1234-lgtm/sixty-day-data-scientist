@@ -1,0 +1,127 @@
+---
+day: 34
+title: "Deep learning checkpoint: an end-to-end classifier"
+phase: 3
+minutes: 120
+objectives:
+  - "Build the full pipeline: data, model, training, honest evaluation"
+  - "Save reloadable artifacts: weights, tokenizer, metrics"
+  - "Write the five-bullet report a stakeholder could act on"
+tags: ["deep-learning", "capstone", "pytorch", "phase-3"]
+---
+
+Phase 3 ends today. Days 23 through 33 are now background knowledge; the
+deliverable is one artifact — a trained, evaluated, saved and honestly
+reported classifier. This is the Days 55–60 capstone's shape at a scale you
+can finish tonight.
+
+## Choose your battlefield
+
+Two tracks; pick by interest and hardware:
+
+- **Images** — CIFAR-10 or FashionMNIST with your own CNN (Day 28) plus a
+  fine-tuned ResNet (Day 29).
+- **Text** — a small Hugging Face dataset (Day 32's emotion data, or ag_news)
+  fine-tuned on DistilBERT.
+
+Both fit in an evening on CPU or a free GPU, and the engineering shape is
+identical — which is the point: pipeline, model, train, evaluate, save,
+report.
+
+## The pipeline
+
+```python
+from datasets import load_dataset
+from transformers import AutoTokenizer
+
+raw = load_dataset("dair-ai/emotion")        # train, validation, test
+tok = AutoTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
+enc = raw.map(lambda b: tok(b["text"], truncation=True), batched=True)
+labels = raw["train"].features["label"].names
+print(len(labels), "classes:", labels)
+```
+
+Freeze the test split now and do not look at it again until the final
+evaluation. Day 27's validation curves are for decisions; the test set is for
+the truth.
+
+## Model, train, evaluate
+
+```python
+from transformers import AutoModelForSequenceClassification, Trainer, TrainingArguments
+
+model = AutoModelForSequenceClassification.from_pretrained(
+    "distilbert/distilbert-base-uncased", num_labels=len(labels)
+)
+args = TrainingArguments(
+    output_dir="artifacts/day34",
+    learning_rate=2e-5,
+    per_device_train_batch_size=16,
+    num_train_epochs=3,
+    eval_strategy="epoch",
+    save_strategy="epoch",
+    load_best_model_at_end=True,
+)
+trainer = Trainer(model=model, args=args,
+                  train_dataset=enc["train"], eval_dataset=enc["validation"])
+trainer.train()
+trainer.evaluate(enc["test"])      # the test set: touched exactly once
+```
+
+Honest evaluation is more than one number: overall accuracy, a confusion
+matrix, per-class recall — the classes the model silently fails on are the
+story. And compare against a baseline that is not deep learning: Phase 2's
+logistic regression on TF-IDF features takes minutes and grounds the claim
+that the neural model earns its keep.
+
+## Save artifacts, write the report
+
+```python
+import json
+
+trainer.save_model("artifacts/day34/final")
+tok.save_pretrained("artifacts/day34/final")
+with open("artifacts/day34/final/metrics.json", "w") as f:
+    json.dump(trainer.evaluate(enc["test"]), f, indent=2)
+```
+
+`save_model` writes portable weights plus config, so a fresh `from_pretrained`
+reloads the model anywhere. Then the five bullets — the actual deliverable:
+
+1. **Task** — classify short texts into six emotions, in one sentence.
+2. **Data** — source, size, splits, class balance, and one caveat.
+3. **Model** — DistilBERT body with a fresh head, and why that choice.
+4. **Result** — test accuracy and per-class recall versus the non-neural
+   baseline.
+5. **Caveats and next step** — the honest limits, plus the single
+   highest-value experiment you did not run.
+
+<Callout kind="warn" title="The test set is sacred">
+Every metric you peek at during development quietly becomes a training
+signal: you pick checkpoints, thresholds and even ideas because of what you
+saw. That is Phase 2's leakage wearing a GPU. Decide on validation, touch the
+test set once, and report the number you saw first — not the best number you
+saw.
+</Callout>
+
+## Resources
+
+- [PyTorch — Tutorials](https://pytorch.org/tutorials/) — the reference for the image track
+- [Hugging Face — LLM Course](https://huggingface.co/learn/llm-course/chapter1/1) — the reference for the text track
+- [Karpathy — A Recipe for Training Neural Networks](https://karpathy.github.io/2019/04/25/recipe/) — the checklist this day secretly follows
+
+## Exercise
+
+1. Run the full pipeline for your chosen track end to end and commit the code
+   plus the five-bullet report.
+2. Add the confusion matrix and per-class recall; name the worst class and one
+   hypothesis for why it struggles.
+3. Swap exactly one decision — dataset, model size, learning rate or
+   augmentation — and report the delta in one sentence. Your first ablation.
+
+<Quiz
+  question="Why save model weights as a state_dict (what trainer.save_model writes) instead of pickling the whole model object?"
+  options={["Because state_dict files are portable weights that load into a fresh model instance, without depending on your exact class definitions and code paths", "Because pickled models cannot store weights", "Because state_dict compresses weights losslessly", "Because PyTorch refuses to pickle nn.Module objects"]}
+  answer={0}
+  explanation="Pickling ties the artifact to your code: loading requires the same classes, module paths and structure. A state_dict is just a weight dictionary — reload it into any matching architecture."
+/>

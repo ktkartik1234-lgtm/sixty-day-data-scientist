@@ -1,0 +1,137 @@
+---
+day: 60
+title: "Portfolio, write-up and the road ahead"
+phase: 6
+minutes: 75
+objectives:
+  - "Reshape the capstone README into a recruiter-proof portfolio entry"
+  - "Write the project narrative: problem, approach, results, limitations, next steps"
+  - "Close the 60 days with an honest inventory of what you can now do"
+  - "Commit to a concrete next-60-days specialization plan"
+tags: ["portfolio", "write-up", "communication", "career"]
+blog:
+  - "case-study-financial-stress"
+  - "hello-60-days"
+---
+
+Sixty days ago this was a folder of installs; today it is a deployed,
+documented, leakage-audited capstone. The final skill of the program is the
+one that makes the other 59 visible: telling the story so a stranger — a
+recruiter, an interviewer, a future teammate — gets it in two minutes.
+
+## The README is the product
+
+Recruiters and engineers read the top of your repository first and often
+last. Give the first screen the whole story:
+
+```
+financial-stress-prediction
+├── Problem      — flag mobile-money customers at liquidity risk in 30 days
+├── Data         — 40,000 customer snapshots, 184 columns, 15% prevalence
+├── Method       — leakage audit, panel features, logistic vs gradient boosting
+├── Results      — PR-AUC with CI, Brier after calibration, cost-based threshold
+├── Demo         — Dockerized FastAPI endpoint (curl example below)
+├── Reproduce    — three commands, fixed seed
+└── Limitations  — worst slice, drift risk, out-of-scope uses
+```
+
+Then generate the results table from code, never by hand, so it can never
+disagree with the notebook:
+
+```python
+import pandas as pd
+
+results = pd.DataFrame([
+    {"model": "majority class",      "pr_auc": prevalence,  "roc_auc": 0.500},
+    {"model": "logistic regression", "pr_auc": pr_logistic, "roc_auc": ra_logistic},
+    {"model": "gradient boosting",   "pr_auc": pr_boosted,  "roc_auc": ra_boosted},
+])
+print(results.to_markdown(index=False))
+```
+
+Fill the values from the harness output of Day 57 and the test metrics of
+Day 58; a table anyone can regenerate is a table nobody can accuse of
+wishful thinking.
+
+## The write-up: five moves
+
+Whether it is a README, a blog post, or an interview answer, the narrative is
+the same five moves:
+
+1. **Problem** — one paragraph, no jargon: who risks what, and which decision
+   the model changes. The Day 55 framing contract is the raw material.
+2. **Approach** — the three or four decisions that mattered: the leakage
+   audit, the panel features, the baseline ladder, calibration. Decisions,
+   not a code tour.
+3. **Results** — the table with confidence intervals, the calibration curve,
+   the slice report, the threshold policy. Numbers with their uncertainty.
+4. **Limitations** — the section that buys you credibility: worst cohort,
+   drift risk, what the model must never be used for. Model-card language
+   works here verbatim.
+5. **Next steps** — what one more week would buy: deeper panel dynamics, a
+   fairness audit, drift monitoring. Specific beats aspirational.
+
+Publish it as your first portfolio post, alongside the case study — that
+document exists precisely so you can see the genre before writing in it.
+
+## Sixty days, inventoried honestly
+
+Let the git log speak first: `git log --oneline` is two months of evidence.
+Then inventory what you can now *do*, in verbs — set up a reproducible
+environment, audit a dataset for leakage, derive gradients by hand, build
+and tune boosted trees inside leak-proof pipelines, evaluate with
+calibration and confidence intervals, deploy behind an API in Docker, and
+write the documents that make it all trustworthy. That is a junior data
+scientist's job description, learned in evenings.
+
+The opening post, [Hello, 60 Days](/blog/hello-60-days), made promises.
+Check them off one by one, and note honestly which slipped — an honest list
+is more persuasive than a perfect one, in portfolios as in model cards.
+
+## The next 60 days
+
+Momentum dies in the gap between projects, so open the next block today:
+pick one specialization and set three dated milestones.
+
+- **ML engineering depth** — tests, CI, model registries, serving at scale;
+  rebuild the capstone API with load tests and a registry.
+- **Language models** — the attention paper, fine-tuning, RAG and LoRA;
+  ship one small retrieval demo. The roadmap's papers list is the syllabus.
+- **Finance domain depth** — time-series on the monthly panels, credit-risk
+  scorecards, uplift modeling for the outreach decision itself.
+- **Theory revisit** — work back through the math track (PCA eigens,
+  backprop, convexity) until each result can be re-derived on paper.
+
+Choose one, write the three milestones into the README of a new repository,
+and make the first commit tonight — the same rule that started Day 1.
+
+<Callout kind="tip" title="Ship the imperfect thing">
+  A live project with rough edges beats a perfect notebook every time: it
+  proves you can carry work past the modeling cell, where most portfolios
+  end. The capstone is not done because the metrics are final — it is done
+  when a stranger can find it, run it, read its model card, and tell you
+  what it does in one paragraph.
+</Callout>
+
+## Resources
+
+- [GitHub Docs — About READMEs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes)
+- [Google — Rules of Machine Learning](https://developers.google.com/machine-learning/guides/rules-of-ml) — re-read as a checklist for the write-up.
+- [Made With ML](https://madewithml.com/) — a well-known open MLOps course; a strong spine for an ML-engineering next-60-days.
+
+## Exercise
+
+1. Rebuild the README on the anatomy above — problem, data, method, results
+   table generated from code, demo link, reproduce commands, limitations —
+   then view the repository page logged out and fix whatever confuses.
+2. Write the 800–1,200 word write-up using the five moves and publish it as
+   a blog post or repository discussion; link it from the README.
+3. Create the next-60-days repository: one specialization, three dated
+   milestones, and a first commit — tonight, while the momentum is yours.
+
+<Quiz
+  question="A recruiter spends 90 seconds on your repository. Which element most often decides whether they keep reading?"
+  options={["Total number of commits", "A first screen stating the problem, the headline result with uncertainty, and a working demo link", "How long the main notebook is", "Using the newest deep learning architecture"]}
+  answer={1}
+  explanation="Attention is spent at the top of the README. Problem, result with uncertainty, proof it runs — those three survive a 90-second skim; everything else gets read only if they land."
+/>

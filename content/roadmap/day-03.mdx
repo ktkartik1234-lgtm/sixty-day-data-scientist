@@ -1,0 +1,146 @@
+---
+day: 3
+title: "Matrix transformations: multiplication as geometry"
+phase: 1
+minutes: 75
+objectives:
+  - "Read matmul entry-by-entry as row-times-column, and as composing motions"
+  - "Use identity and inverse matrices with confidence"
+  - "Recognize X @ W + b as a neural network layer"
+  - "Benchmark NumPy matmul against pure-Python loops"
+tags: ["math", "linear-algebra", "numpy"]
+math:
+  - "linear-algebra/matrix-transformations"
+---
+
+Yesterday matrices were grids of numbers. Today they become **motions**:
+rotate, stretch, flip, project. The full lesson lives in the math track —
+**[Matrix transformations](/math/linear-algebra/matrix-transformations)** —
+and the payoff is seeing that a neural network layer is one of these motions.
+
+## Matmul mechanics: every entry is a row times a column
+
+$$(AB)_{ij} = \sum_k A_{ik} \, B_{kj}$$
+
+Entry $(i, j)$ of the product is the dot product of row $i$ of $A$ with column
+$j$ of $B$. That is the whole rule — everything else is geometry:
+
+```python
+import numpy as np
+
+A = np.array([[1.0, 2.0],
+              [0.0, 1.0]])
+B = np.array([[2.0, 0.0],
+              [1.0, 1.0]])
+
+C = A @ B
+print(C[0, 1])                          # row 0 of A dot column 1 of B
+print(A[0] @ B[:, 1])                   # the same number, computed by hand
+```
+
+## Composition: transformations applied in sequence
+
+Multiplying by a matrix *moves* every vector. Multiplying by a product $AB$
+moves it by $B$ first, then by $A$:
+
+$$(AB)\mathbf{v} = A(B\mathbf{v})$$
+
+```python
+theta = np.pi / 4                        # 45 degrees
+R = np.array([[np.cos(theta), -np.sin(theta)],
+              [np.sin(theta),  np.cos(theta)]])   # rotation
+
+S = np.array([[2.0, 0.0],
+              [0.0, 1.0]])                        # stretch the x-axis 2x
+
+v = np.array([1.0, 0.0])
+print(R @ v)            # rotated: about [0.71, 0.71]
+print(S @ (R @ v))      # rotate, then stretch
+print((S @ R) @ v)      # identical — composition is associative
+print(np.allclose(S @ R, R @ S))    # False: order matters!
+```
+
+$SR$ stretches the rotated arrow; $RS$ rotates the stretched one. Same
+ingredients, different motion — matrix multiplication is **not commutative**.
+
+## Identity and inverse
+
+$I$ moves nothing (`np.eye(n)`); $A^{-1}$ undoes $A$ exactly:
+$A^{-1}A = I$. A matrix is invertible only when the motion loses no
+information — no collapsing of dimensions (determinant zero).
+
+```python
+M = S @ R
+print(np.allclose(np.linalg.inv(M) @ M, np.eye(2)))   # True
+
+# in practice, solve rather than invert:
+b = np.array([1.0, 3.0])
+print(np.linalg.solve(M, b))            # x with M @ x = b — faster and stabler
+```
+
+## Why X @ W + b IS a neural network layer
+
+Stack one data row per sample into $X$ (shape: samples by features). Then
+
+$$\mathbf{h} = \sigma(XW + \mathbf{b})$$
+
+- $W$ (features by features) is a learned motion applied to every sample at
+  once — row $i$ of the output is just $X$'s row moved by $W$.
+- $\mathbf{b}$ shifts every sample the same way.
+- $\sigma$ bends the result so that stacking layers is not just one big
+  composed motion.
+
+A deep network is a **composition of learned linear motions interleaved with
+bends** — nothing you have not already done by hand above.
+
+## Benchmark: why we never loop
+
+```python
+import time
+
+n = 200
+A = np.random.rand(n, n)
+B = np.random.rand(n, n)
+
+start = time.perf_counter()
+C1 = [[sum(A[i][k] * B[k][j] for k in range(n)) for j in range(n)] for i in range(n)]
+loop_s = time.perf_counter() - start
+
+start = time.perf_counter()
+C2 = A @ B
+blas_s = time.perf_counter() - start
+
+print(f"Python loops : {loop_s:.3f} s")
+print(f"NumPy matmul : {blas_s:.6f} s")
+print(f"speedup      : about {loop_s / blas_s:,.0f}x")
+```
+
+<Callout kind="deep" title="Layers are motions, training is tuning">
+  Forward pass = compose the motions. Training (Day 9) = nudge the entries of
+  each $W$ so the composition maps inputs toward correct outputs. Initialization,
+  normalization, PCA — they all manage the *geometry* of these motions, which is
+  why this week's linear algebra is not academic.
+</Callout>
+
+## Resources
+
+- [3Blue1Brown — Essence of Linear Algebra](https://www.3blue1brown.com/topics/linear-algebra), chapters 3–4: linear transformations and "matrix multiplication as composition".
+- [Immersive Linear Algebra](http://immersivemath.com/ila/index.html) — chapter 3 has draggable figures for exactly this lesson.
+- [NumPy linalg reference](https://numpy.org/doc/stable/reference/routines.linalg.html) — `inv`, `solve`, `det`, `eig` under one roof.
+
+## Exercise
+
+1. Write `rotate(theta)` that returns the 2-by-2 rotation matrix, then verify
+   `rotate(a) @ rotate(b)` equals `rotate(a + b)` with `np.allclose` — angles
+   compose the way you would hope.
+2. Pick a point, apply `S @ R` and `R @ S`, and describe in one sentence each
+   where the point lands and why the order changes the outcome.
+3. Rerun the benchmark at `n = 100` and `n = 500`: how does each timing scale?
+   Record both numbers in your notebook and commit.
+
+<Quiz
+  question="For a stretch matrix S and a rotation R, which statement is true?"
+  options={["Matrix multiplication commutes, so S @ R equals R @ S", "Order matters: S @ R and R @ S are generally different motions", "Both products equal the identity matrix", "Order matters only for rectangular matrices"]}
+  answer={1}
+  explanation="Composition is associative but not commutative. Stretch-then-rotate distorts directions that rotate-then-stretch leaves alone, so the two products differ."
+/>

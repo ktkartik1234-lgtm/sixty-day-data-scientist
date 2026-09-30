@@ -1,0 +1,114 @@
+---
+day: 29
+title: "Transfer learning: standing on pretrained shoulders"
+phase: 3
+minutes: 75
+objectives:
+  - "Replace a pretrained model's head with your own classifier"
+  - "Decide between frozen-backbone feature extraction and fine-tuning"
+  - "Use augmentation and pretrained normalization on small datasets"
+tags: ["deep-learning", "transfer-learning", "computer-vision", "phase-3"]
+papers:
+  - "deep-residual-learning"
+  - "vision-transformer"
+---
+
+Yesterday's from-scratch CNN earned roughly 70 percent on CIFAR-10 after ten
+epochs. A [ResNet](/papers) pretrained on ImageNet clears 95 percent with a
+few minutes of head-only training — because its features already exist.
+
+## Why pretrained features transfer
+
+Early conv layers learn edges, color blobs and textures — the visual
+vocabulary every image task shares. The [ResNet](/papers) checkpoints trained
+on 1.2 million ImageNet images, and ViT-style models from the
+[vision transformer](/papers) lineage on hundreds of millions more, encode
+that vocabulary in their weights. Your 500-image problem does not need to
+relearn edges; it needs a small classifier on top of a frozen visual
+dictionary. This is the deepest form of the reuse this course keeps finding:
+the same idea that made kernels shared across locations now makes entire
+networks shared across tasks.
+
+## Replace the head
+
+```python
+import torch.nn as nn
+from torchvision import models
+
+model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+model.fc = nn.Linear(model.fc.in_features, 10)   # swap the 1000-way head for yours
+```
+
+The same move works for vision transformers in two lines via transformers:
+load a `ViTForImageClassification` checkpoint, replace its classifier head.
+The rule never changes: new task, new head; the body is a feature extractor.
+
+## Freeze, then fine-tune
+
+```python
+for p in model.parameters():
+    p.requires_grad = False               # freeze the backbone
+model.fc = nn.Linear(model.fc.in_features, 10)
+# the optimizer now sees only the head's ~5k parameters
+
+# optional, data permitting — unfreeze the last block only:
+for p in model.layer4.parameters():
+    p.requires_grad = True
+```
+
+Decision rule: little data, or a domain far from natural photos — freeze more,
+train the head longer, and use a small learning rate (1e-4 or less) when you
+do unfreeze. Plenty of similar-domain data — fine-tune everything with a low
+learning rate from the start. One small-data gotcha: with tiny batches,
+BatchNorm's running statistics get corrupted, so keep BN layers frozen or in
+eval mode even while fine-tuning the rest.
+
+## Augmentation for small data
+
+Day 27's augmentation earns its keep here more than anywhere: every augmented
+view is a fresh, free sample for the head you are training.
+
+```python
+from torchvision import transforms
+
+train_tf = transforms.Compose([
+    transforms.RandomResizedCrop(224),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+])
+```
+
+Those exact mean and standard deviation values are the ImageNet statistics the
+pretrained model was fed — copy them, never invent them.
+
+<Callout kind="tip" title="Borrow the preprocessing, not just the weights">
+The pretrained model expects inputs normalized with specific statistics.
+Skipping that normalization raises no error — your features are just quietly
+worse and you will blame the wrong thing. Whenever you adopt pretrained
+weights, adopt the exact preprocessing pipeline they were trained with.
+</Callout>
+
+## Resources
+
+- [PyTorch — Transfer Learning for Computer Vision](https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html)
+- [timm — PyTorch Image Models](https://github.com/huggingface/pytorch-image-models) — a thousand pretrained checkpoints behind one API
+- [ViT — An Image is Worth 16x16 Words](https://arxiv.org/abs/2010.11929) — NLP-style pretraining imported into vision
+
+## Exercise
+
+1. Head-only baseline: freeze a ResNet-18, train the new head on CIFAR-10, and
+   put its accuracy next to yesterday's from-scratch number.
+2. Fine-tune variant: unfreeze `layer4` with a learning rate of 1e-4 and
+   compare against the frozen version.
+3. Ablate augmentation on a 2,000-image subset — run once with and once
+   without the random transforms — and quantify what augmentation bought you.
+   Commit the comparison table.
+
+<Quiz
+  question="You have 500 labeled images of industrial defects in 10 classes and a pretrained ResNet. Best starting strategy?"
+  options={["Train the entire network from scratch on the 500 images", "Freeze the backbone, train only a new head, then optionally unfreeze the last block with a small learning rate", "Fine-tune everything immediately with a high learning rate", "Use the pretrained model as-is without any training"]}
+  answer={1}
+  explanation="Tiny dataset: the backbone's features are already good, so train the cheap head first. Unfreeze deeper blocks later, with a small learning rate, only if the domain gap demands it."
+/>

@@ -1,0 +1,146 @@
+---
+day: 52
+title: "Docker for ML: reproducible environments"
+phase: 5
+minutes: 85
+objectives:
+  - "Explain images, layers and build cache well enough to debug a slow build"
+  - "Write a lean Dockerfile for the FastAPI model server"
+  - "Run the API alongside a database sidecar with docker compose"
+tags: ["docker", "mlops", "containers", "compose", "devops"]
+---
+
+Yesterday's endpoint works — on your laptop, with your Python, your joblib
+build and your scikit-learn patch version. Docker freezes that exact world
+into an image anyone can run bit-for-bit, which is what "works on my machine"
+should have meant all along.
+
+## 1. Images, layers and the cache
+
+An image is a stack of read-only layers, one per Dockerfile instruction; the
+running container adds a thin writable layer on top. Builds are cached layer
+by layer, top to bottom: the first instruction whose inputs changed
+invalidates itself and everything after it. Order is therefore a performance
+decision — instructions whose inputs rarely change (system packages,
+dependencies) go first; the code that changes every hour goes last.
+
+## 2. A lean Dockerfile for the model server
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# dependencies change rarely, so this layer stays cached
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# code and model change often, so they come last
+COPY app.py model.joblib ./
+
+RUN useradd --create-home appuser
+USER appuser                     # never serve as root
+
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+`slim` keeps the base image small instead of shipping a full OS;
+`--no-cache-dir` drops pip's download cache; the non-root user is free
+insurance for anything internet-facing.
+
+## 3. Pinning and .dockerignore
+
+Range specifiers (`pandas>=2.0`) make builds a lottery: two builds a week
+apart can install different versions. Pin everything:
+
+```text
+# requirements.txt
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic==2.10.4
+scikit-learn==1.6.0
+pandas==2.2.3
+joblib==1.4.2
+```
+
+Companion file, same directory:
+
+```text
+# .dockerignore
+.git
+__pycache__/
+*.ipynb
+data/
+.venv/
+.env
+```
+
+The build context is what `COPY . .` would ship; ignoring notebooks, data and
+secrets keeps builds fast and prevents an accidental copy of credentials or a
+2 GB CSV into a layer that will live in registries for years.
+
+## 4. Compose: app plus a database sidecar
+
+Real services need neighbors — a database, a cache. Compose runs them as one
+declared stack:
+
+```yaml
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://ml:mlpass@db:5432/predictions
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ml
+      POSTGRES_PASSWORD: mlpass
+      POSTGRES_DB: predictions
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ml"]
+      interval: 5s
+      retries: 5
+```
+
+`docker compose up --build` starts both; inside the compose network the
+database is reachable at the hostname `db`, which is why the URL says `db`
+rather than `localhost`.
+
+<Callout kind="warn" title="Your data does not belong in the image">
+  Images are pushed, pulled and cached for years, and layers are forever —
+  deleting a file in a later instruction does not remove it from earlier
+  layers. A training CSV, a `.env` file or credentials baked into any layer
+  is effectively public the moment you push. COPY code and pinned model
+  artifacts only; data lives in volumes and object storage, secrets in
+  environment variables or a vault.
+</Callout>
+
+## Resources
+
+- [Docker — Get started](https://docs.docker.com/get-started/) — images, containers and the build cache, from the source.
+- [FastAPI — Docker deployment](https://fastapi.tiangolo.com/deployment/docker/) — official patterns for containerizing FastAPI.
+- [Docker Compose documentation](https://docs.docker.com/compose/) — multi-service stacks and healthchecks.
+
+## Exercise
+
+1. Containerize yesterday's FastAPI app, run it, and curl `/health` and
+   `/predict` from the host machine.
+2. Rebuild after touching only `app.py` and record the build time; then move
+   the `COPY app.py` line above the `pip install` line, rebuild, and record
+   the damage — cache order made visible.
+3. Add the postgres sidecar via compose, print `DATABASE_URL` inside the app
+   at startup, and confirm the connection reaches `db`. Commit both files.
+
+<Quiz
+  question="Why does COPY requirements.txt plus pip install come BEFORE COPY app.py in a well-ordered Dockerfile?"
+  options={["Docker requires dependencies to be declared first", "Code changes more often than dependencies, so putting it last preserves the expensive pip-install cache layer", "It makes the final image smaller", "pip install cannot run after source files are copied"]}
+  answer={1}
+  explanation="Layers invalidate top-down: any change to app.py would bust the cache for all later layers, so the rarely-changing dependency install must sit above the frequently-changing code copy."
+/>

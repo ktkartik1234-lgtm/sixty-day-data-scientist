@@ -1,0 +1,120 @@
+---
+day: 28
+title: "CNNs: convolution as pattern matching"
+phase: 3
+minutes: 120
+objectives:
+  - "Explain kernels, stride, padding, pooling and feature maps"
+  - "Compute conv layer output sizes and parameter counts"
+  - "Build and train a small CNN on CIFAR-10"
+  - "Explain why residual shortcuts enable very deep networks"
+tags: ["deep-learning", "cnn", "computer-vision", "phase-3"]
+papers:
+  - "deep-residual-learning"
+---
+
+Yesterday was about honesty; today is about geometry. Pixels are only
+meaningful in neighborhoods, and a cat is a cat whether it sits at the top-left
+or the bottom-right — convolution builds both facts into the architecture
+itself.
+
+## Convolution: a sliding pattern detector
+
+A kernel (filter) is a small grid of weights, say 3 by 3, swept across the
+image. At each location it computes one number — how strongly the local patch
+matches the pattern:
+
+$$(I * K)_{i,j} = \sum_{m=0}^{k-1} \sum_{n=0}^{k-1} I_{i+m,\; j+n}\, K_{m,n}$$
+
+The responses over all locations form a **feature map**: literally a map of
+where the pattern fires. Stack 32 kernels on an RGB input and layer one learns
+32 detectors — trained from scratch they start as edge and color blobs; the
+pretrained versions you meet tomorrow are exactly that, refined by a million
+images.
+
+## Stride, padding, pooling — and the parameter math
+
+Output height for input $H$, kernel $K$, padding $P$, stride $S$:
+
+$$H_{\text{out}} = \left\lfloor \frac{H + 2P - K}{S} \right\rfloor + 1$$
+
+Two sanity checks: padding 1 with stride 1 and kernel 3 preserves size;
+stride 2 halves it. Max pooling downsamples by keeping the strongest evidence
+in each window. The parameter math is the headline: a 3 by 3 filter over 32
+input channels has $3 \cdot 3 \cdot 3 \cdot 32 + 32 = 896$ weights whether the
+image is 32 by 32 or 512 by 512, versus roughly 3 million for one fully
+connected layer from 3072 pixels to 1000 units. The same small kernel is
+**shared across every location**.
+
+## Build and train a CIFAR-10 CNN
+
+```python
+import torch.nn as nn
+
+cnn = nn.Sequential(
+    nn.Conv2d(3, 32, kernel_size=3, padding=1), nn.ReLU(), nn.MaxPool2d(2),   # 32x16x16
+    nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(), nn.MaxPool2d(2),  # 64x8x8
+    nn.Flatten(),
+    nn.Linear(64 * 8 * 8, 10),
+)
+
+# training is Day 26's loop verbatim:
+# loss_fn = nn.CrossEntropyLoss()
+# opt = torch.optim.Adam(cnn.parameters(), lr=1e-3)
+# for epoch in range(10):
+#     train_one_epoch(cnn, train_loader, opt)
+#     print(evaluate(cnn, test_loader))
+```
+
+About thirty lines including the loader gets you to roughly 70 percent on
+CIFAR-10 — respectable for a from-scratch CNN, and tomorrow's baseline.
+
+## Depth: the degradation problem and ResNet's fix
+
+Deeper should be strictly better — a 56-layer plain network could at worst
+imitate a 20-layer one by copying its inputs through the extra layers. In
+practice the [ResNet paper](/papers) showed deeper *plain* networks train
+*worse*, even on training data — an optimization failure, not overfitting. The
+fix is almost embarrassing: let each block learn a residual on top of its
+input.
+
+$$y = \mathcal{F}(x, \{W_i\}) + x$$
+
+If the best a block can do is nothing, it drives $\mathcal{F}$ toward zero
+instead of sculpting an identity transform through nonlinear layers — and the
+shortcut gives gradients a highway backward. Skip connections are now
+universal; you will meet them again inside the Transformer on Day 31.
+
+<Callout kind="deep" title="Weight sharing is the whole trick">
+A fully connected layer learns separate weights for every pixel-to-unit pair;
+a convolution learns one small detector and applies it at every location. An
+ear detector should not care whether the ear is at pixel (10, 10) or
+(200, 150). Fewer parameters, translation tolerance, and a built-in prior that
+nearby pixels matter together — an architectural bet, and exactly the kind of
+bet modern architecture design still makes.
+</Callout>
+
+## Resources
+
+- [CS231n — Convolutional Networks](https://cs231n.github.io/convolutional-networks/) — the definitive treatment of conv arithmetic
+- [PyTorch — Training a CIFAR-10 classifier](https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html)
+- [ResNet — Deep Residual Learning for Image Recognition](https://arxiv.org/abs/1512.03385) — the paper behind today's last section
+- [Distill — Feature Visualization](https://distill.pub/2017/feature-visualization/) — what conv filters actually learn to detect
+
+## Exercise
+
+1. Print each layer's output shape with a dummy tensor of shape (1, 3, 32, 32)
+   and verify the comments by hand with the size formula.
+2. Count parameters for both conv layers and the final linear layer; compare
+   against a fully connected net on flattened 3072-pixel input with one
+   100-unit hidden layer.
+3. Train the CIFAR-10 CNN for 10 epochs, log train and test accuracy per
+   epoch, and save the log — Day 29 reuses it for a transfer-learning
+   comparison.
+
+<Quiz
+  question="Why is a conv layer with 3x3 filters so much cheaper than a fully connected layer on the same image?"
+  options={["It processes the image at lower resolution", "Its weights are shared across all spatial locations, so the count depends on kernel size, not image size", "It stores weights in fewer bits", "It skips parts of the image entirely"]}
+  answer={1}
+  explanation="One kernel of weights is reused at every position: parameter count scales with kernel size and channel counts, not with image area. Sharing also buys translation tolerance."
+/>

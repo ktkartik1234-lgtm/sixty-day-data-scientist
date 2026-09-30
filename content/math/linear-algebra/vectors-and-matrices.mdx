@@ -1,0 +1,76 @@
+---
+title: "Vectors and matrices"
+summary: "The vocabulary of ML: data points as vectors, models as matrix multiplication, eigenvectors as the directions that matter."
+order: 1
+---
+
+Everything in machine learning is a tensor in motion. A dataset with $n$ rows
+and $d$ features **is** a matrix $X \in \mathbb{R}^{n \times d}$; a linear
+model's prediction **is** a matrix-vector product.
+
+## Vectors: data points with geometry
+
+A vector $\mathbf{x} = [x_1, \dots, x_d]^\top$ is one example described by $d$
+numbers. Two operations carry all the meaning:
+
+$$\mathbf{x} \cdot \mathbf{y} = \mathbf{x}^\top \mathbf{y} = \sum_{i=1}^{d} x_i y_i
+\qquad \text{(dot product — similarity)}$$
+
+$$\lVert \mathbf{x} \rVert_2 = \sqrt{\mathbf{x}^\top \mathbf{x}}
+\qquad \text{(L2 norm — magnitude)}$$
+
+The dot product measures *alignment*. Cosine similarity normalizes it:
+
+$$\cos(\theta) = \frac{\mathbf{x}^\top \mathbf{y}}{\lVert \mathbf{x}\rVert \, \lVert \mathbf{y}\rVert}$$
+
+<Callout kind="deep" title="Where you'll meet it">
+  Cosine similarity over embeddings is the engine of retrieval-augmented
+  generation (Day 37) and every vector database you'll ever use.
+</Callout>
+
+## Matrices: transformations
+
+Multiplying by a matrix transforms space. For a linear model:
+
+$$\hat{\mathbf{y}} = X\mathbf{w} + b$$
+
+each row of $X$ flows through the same transformation — which is why vectorized
+NumPy code beats Python loops by orders of magnitude.
+
+## Eigenvectors: the directions that matter
+
+For a square matrix $A$, an eigenvector $\mathbf{v}$ satisfies:
+
+$$A\mathbf{v} = \lambda \mathbf{v}$$
+
+the transformation only stretches it, doesn't rotate it. PCA (Day 21) works
+by finding the eigenvectors of the covariance matrix — the directions where
+your data varies most.
+
+## Resources
+
+- [3Blue1Brown — Essence of Linear Algebra](https://www.3blue1brown.com/topics/linear-algebra) — watch chapters 1–4 and 14; the geometric intuition is unmatched.
+- [MIT OCW 18.06 — Gilbert Strang](https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/) — lectures 1–3 and 21 for eigendecomposition.
+- [Khan Academy — Vectors and spaces](https://www.khanacademy.org/math/linear-algebra/vectors-and-spaces) — drill practice.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  Let $A = \begin{bmatrix} 2 & 1 \\ 1 & 2 \end{bmatrix}$. Show that
+  $\mathbf{v} = \begin{bmatrix} 1 \\ 1 \end{bmatrix}$ is an eigenvector and find
+  its eigenvalue.
+</Callout>
+
+<Solution>
+  $$A\mathbf{v} = \begin{bmatrix} 2 & 1 \\ 1 & 2 \end{bmatrix}\begin{bmatrix} 1 \\ 1 \end{bmatrix} = \begin{bmatrix} 2+1 \\ 1+2 \end{bmatrix} = \begin{bmatrix} 3 \\ 3 \end{bmatrix} = 3\,\mathbf{v}$$
+
+  So $\lambda = 3$: the all-ones direction gets stretched threefold. The other
+  eigenvector is $[1, -1]^\top$ with $\lambda = 1$.
+</Solution>
+
+<Quiz
+  question="In a vector database, documents are retrieved by ranking which quantity?"
+  options={["L2 norm of each embedding", "Dot product / cosine similarity between query and document embeddings", "Number of tokens per document", "Document frequency in the corpus"]}
+  answer={1}
+  explanation="Retrieval ranks by embedding similarity — typically cosine similarity or dot product, which measure alignment between the query vector and document vectors."
+/>

@@ -1,0 +1,128 @@
+---
+day: 53
+title: "CI/CD and experiment tracking"
+phase: 5
+minutes: 85
+objectives:
+  - "Build a GitHub Actions pipeline that lints, tests and builds on every push"
+  - "Write pytest tests for data transforms that catch silent breakage"
+  - "Log params, metrics and artifacts with MLflow and register the result"
+tags: ["ci-cd", "github-actions", "pytest", "mlflow", "mlops"]
+---
+
+Docker made environments reproducible; today we make *changes* reproducible.
+Two ledgers get built: CI proves the code still works on every push, and
+experiment tracking proves each model was actually as good as you remember.
+
+## 1. Lint, test, build on every push
+
+```yaml
+# .github/workflows/ci.yml
+name: ci
+on: [push, pull_request]
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: lint
+        run: ruff check . && ruff format --check .
+      - name: test
+        run: pytest tests/ -q
+      - name: build image
+        run: docker build -t stress-api:${{ github.sha }} .
+```
+
+Green means lint passed, tests passed, the image builds. The reviewer's first
+questions are now answered by a robot before a human ever looks.
+
+## 2. Tests for data code
+
+Data code fails silently: a renamed column does not raise, it becomes a
+column of NaNs and quietly poisons the next model. Test transforms the way
+you test functions — known input, asserted output:
+
+```python
+# tests/test_transforms.py
+import pandas as pd
+
+from src.features import add_debt_ratio
+
+def test_debt_ratio_values():
+    df = pd.DataFrame({"income": [100.0, 200.0], "debts": [50.0, 0.0]})
+    out = add_debt_ratio(df)
+    assert out["debt_ratio"].tolist() == [0.5, 0.0]
+
+def test_debt_ratio_no_nulls():
+    df = pd.DataFrame({"income": [100.0], "debts": [10.0]})
+    assert not add_debt_ratio(df)["debt_ratio"].isna().any()
+```
+
+The high-value trio for any transform: exact values on a tiny fixture, no
+unexpected nulls, and row-count plus schema preservation.
+
+## 3. Experiment tracking: params, metrics, artifacts
+
+Every training run leaves three kinds of evidence, and MLflow logs each in
+two lines:
+
+```python
+import mlflow
+
+with mlflow.start_run(run_name="rf-debt-ratio"):
+    mlflow.log_params({"n_estimators": 300, "max_depth": 8, "seed": 42})
+    model.fit(X_train, y_train)
+    mlflow.log_metrics({"val_auc": 0.84, "val_pr_auc": 0.61})
+    mlflow.sklearn.log_model(model, "model",
+                             registered_model_name="stress-clf")
+```
+
+**Params** are the inputs you would need to rerun; **metrics** are the
+evidence it worked; **artifacts** are the model file and plots themselves.
+Six weeks from now, "which of those forty runs used class weights?" becomes a
+filter, not archaeology. Weights and Biases is the same discipline with a
+different dashboard.
+
+## 4. The model registry
+
+A logged run is a result; a *registered* model is a deployable, versioned
+thing. The registry keeps every version, records which one sits in staging
+and which in production, and gives CI a handle: yesterday's Docker image can
+pin `stress-clf/Production`, not "whatever joblib file was newest". Model
+version plus image digest becomes the unit of deployment you can roll back.
+
+<Callout kind="tip" title="If it is not tracked, it did not happen">
+  An experiment you cannot reproduce from its logs will cost more than the
+  one that failed. Two lines of `log_params` today beat an afternoon of
+  scrolling through stale notebook outputs three weeks from now — and track
+  failures too, because knowing what did not work is half the value.
+</Callout>
+
+## Resources
+
+- [GitHub Actions documentation](https://docs.github.com/en/actions) — workflows, jobs and caching, from the source.
+- [pytest documentation](https://docs.pytest.org/) — fixtures and parametrization for data tests.
+- [MLflow documentation](https://mlflow.org/docs/latest/) — tracking, the registry and model logging.
+- [Weights and Biases docs](https://docs.wandb.ai/) — the alternative dashboard, same discipline.
+
+## Exercise
+
+1. Add the workflow above to your repository, push, and get it green — then
+   commit a deliberate lint error and watch the robot catch it.
+2. Write three pytest tests for a feature transform on the capstone data:
+   exact values on a small fixture, no unexpected nulls, row count preserved.
+   Make one fail first, on purpose.
+3. Log a real training run with params, two metrics and the model artifact;
+   register it and record the version number in your README. Commit.
+
+<Quiz
+  question="Why do data pipelines deserve pytest tests even when the code works on today's data?"
+  options={["Upstream schema changes fail silently — a renamed column becomes nulls, not an exception — and tests catch that at CI time", "Tests make pipelines run faster", "pytest is required by GitHub Actions", "Tests replace the need for experiment tracking"]}
+  answer={0}
+  explanation="Data code degrades quietly: shapes, nulls and dtypes drift without errors. Cheap fixture-based tests turn that slow poisoning into a red CI run the moment it starts."
+/>

@@ -1,0 +1,132 @@
+---
+title: "The chain rule and backpropagation"
+summary: "How a nudge to one weight deep in a network shows up in the final loss — composition, computational graphs and reverse-mode differentiation."
+order: 3
+---
+
+A neural network is not one function. It is functions composed inside
+functions — linear maps, activations, losses — stacked dozens of layers deep.
+The chain rule is the tool that differentiates the whole stack, and
+backpropagation is simply the chain rule organized to run efficiently.
+
+## Composition is the whole game
+
+Write $(f \circ g)(x) = f(g(x))$: first apply $g$, then apply $f$ to the
+result. Logistic regression is already a composition — linear map, then
+sigmoid, then loss:
+
+$$J = \underbrace{L}_{\text{loss}}\Big(\underbrace{\sigma}_{\text{sigmoid}}
+\big(\underbrace{w^\top x + b}_{\text{linear}}\big)\Big)$$
+
+A deep network just keeps nesting:
+$J = L\big(a_L(a_{L-1}(\cdots a_1(x)\cdots))\big)$. If we could not
+differentiate compositions, we could not train any of this — so the chain
+rule is not an optional topic; it is the price of admission.
+
+## The chain rule
+
+If $u = g(x)$ and $y = f(u)$, then
+
+$$\frac{dy}{dx} = \frac{dy}{du} \cdot \frac{du}{dx}$$
+
+In words: *local derivatives multiply along the path from input to output.*
+For three composed stages $x \to z \to a \to J$:
+
+$$\frac{\partial J}{\partial x} = \frac{\partial J}{\partial a} \cdot
+\frac{\partial a}{\partial z} \cdot \frac{\partial z}{\partial x}$$
+
+Each factor is the derivative of a *simple* function evaluated at a *known
+point*. That is the whole trick: complicated derivative in, a product of
+simple derivatives out.
+
+## Computational graphs
+
+Unroll the composition into a graph where every node is one elementary
+operation. For $z = w \cdot x$ and $J = z^2$:
+
+```
+x ──┐
+    ├──▶ z = w·x ──▶ J = z²
+w ──┘
+```
+
+The forward pass computes every node and — crucially — *stores* the values.
+To differentiate, walk the same graph backward, multiplying together the
+local derivative of each node, each evaluated at the value that node actually
+took during the forward pass.
+
+## Backpropagation: the chain rule, run in reverse
+
+Backprop is reverse-mode automatic differentiation: start at the output $J$
+with gradient 1 and sweep backward, pushing products of local derivatives
+through the graph. Two properties make it the workhorse of deep learning:
+
+- **One backward pass yields every partial at once** — $\partial J /
+  \partial w$ for all millions of weights simultaneously, at roughly the
+  cost of one extra forward pass.
+- The naive alternative does not scale: finite differences would need one
+  full forward pass *per parameter*, which is hopeless beyond a handful.
+
+## A two-node example, with numbers
+
+Let $x = 2$, $w = 3$, so $z = wx = 6$ and $J = z^2 = 36$.
+
+Backward, one local derivative at a time:
+$\partial J / \partial z = 2z = 12$ and $\partial z / \partial w = x = 2$.
+Multiply along the path:
+
+$$\frac{\partial J}{\partial w} = 12 \times 2 = 24$$
+
+Sanity check by collapsing the graph: $J(w) = (2w)^2 = 4w^2$, so
+$dJ/dw = 8w = 24$ at $w = 3$. The graph and the closed form agree — as they
+must, since they are the same theorem worn two ways.
+
+<Callout kind="deep" title="What loss.backward() actually does">
+  An autograd framework like PyTorch is bookkeeping for exactly this: it
+  records the graph as you compute, stores activations during the forward
+  pass, and multiplies local derivatives in reverse. The memory cost of
+  training — caching activations — and the ability to drop in custom layers
+  (supply a forward function and a local derivative) both fall straight out
+  of this picture. There is no deeper magic underneath.
+</Callout>
+
+## Resources
+
+- [3Blue1Brown — Backpropagation calculus](https://www.3blue1brown.com/lessons/backpropagation) — the chain rule made visual, end to end.
+- [CS231n — Backpropagation and gradients](https://cs231n.github.io/optimization-2/) — worked gradient flows for every common layer.
+- [Karpathy — micrograd](https://github.com/karpathy/micrograd) — a scalar autograd engine in about 100 lines; build it once and backprop is yours forever.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  With $x = 2$ and $w = 2$, define $z = wx$, then $a = z^2$, then
+  $J = (a - y)^2$ with $y = 0$. Compute $J$ and $\partial J / \partial w$
+  through the graph, then verify against a closed form in $w$ alone.
+</Callout>
+
+<Solution>
+  Forward: $z = 2 \times 2 = 4$, then $a = 4^2 = 16$, then
+  $J = (16 - 0)^2 = 256$.
+
+  Backward, one local derivative per edge:
+
+  $$\frac{\partial J}{\partial a} = 2(a - y) = 32, \qquad
+    \frac{\partial a}{\partial z} = 2z = 8, \qquad
+    \frac{\partial z}{\partial w} = x = 2$$
+
+  Multiply along the path from $w$ to $J$:
+
+  $$\frac{\partial J}{\partial w} = 32 \times 8 \times 2 = 512$$
+
+  Check by eliminating the intermediates: $z = 2w$, so
+  $J = \big((2w)^2\big)^2 = 16w^4$ and $dJ/dw = 64w^3 = 64 \times 8 = 512$
+  at $w = 2$. The reversed graph reproduces the closed form exactly — three
+  cheap local derivatives standing in for one messy global one.
+</Solution>
+
+<Quiz
+  question="Why does backpropagation price all weights in a single backward pass, while finite differences cannot?"
+  options={["Backprop reuses shared intermediate results from the stored forward pass; finite differences re-run the whole network per parameter", "Backprop uses higher-order derivatives", "Finite differences are less numerically precise, so they run slower", "Backprop skips layers whose gradients are small"]}
+  answer={0}
+  explanation="Reverse-mode differentiation multiplies local derivatives through one shared graph, so a single sweep prices every parameter. Finite differences perturb one parameter at a time and pay a full forward pass for each — hopeless at millions of weights."
+/>

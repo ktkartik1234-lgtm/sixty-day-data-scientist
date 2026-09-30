@@ -1,0 +1,124 @@
+---
+day: 32
+title: "Hugging Face in practice"
+phase: 3
+minutes: 90
+objectives:
+  - "Run inference with the pipeline API in three lines"
+  - "Load, inspect and prepare a dataset with the datasets library"
+  - "Tokenize text correctly for a pretrained checkpoint"
+  - "Fine-tune a small classifier with Trainer"
+tags: ["hugging-face", "nlp", "transfer-learning", "phase-3"]
+papers:
+  - "vision-transformer"
+---
+
+Yesterday you built a Transformer block by hand. At work you load one: Hugging
+Face is the packaging layer for Day 31's architecture, and the recipe below is
+Day 29's transfer learning transplanted to text — it covers vision
+transformers on images just as well.
+
+## pipeline(): inference in three lines
+
+```python
+from transformers import pipeline
+
+clf = pipeline("sentiment-analysis")
+clf("Backprop is just the chain rule, industrialized.")
+# [{'label': 'POSITIVE', 'score': 0.9998}]
+```
+
+`pipeline()` bundles tokenizer, model and post-processing behind one call,
+with sensible defaults for task, device and truncation. Great for prototypes
+and baselines; you outgrow it the moment you need a custom head or training.
+
+## datasets: data with a type system
+
+```python
+from datasets import load_dataset
+
+ds = load_dataset("dair-ai/emotion", split="train")
+print(ds)              # 16,000 rows of text + label, Arrow-backed, memory-mapped
+print(ds[0])           # a dict: text and integer label
+print(ds.features)     # ClassLabel(names=[...]) — the label vocabulary lives here
+```
+
+The library streams and memory-maps Arrow files, so datasets bigger than RAM
+are routine. Slicing, splitting and `.map()` preprocessing all work lazily.
+
+## Tokenizers: the boundary between text and ids
+
+```python
+from transformers import AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
+enc = tok("Transformers eat sequences for breakfast.", return_tensors="pt")
+print(enc["input_ids"])
+print(tok.convert_ids_to_tokens(enc["input_ids"][0]))   # watch words split into subwords
+```
+
+The tokenizer is checkpoint-specific — its vocabulary and splitting rules were
+frozen when the model was pretrained. Day 33 opens that box; for now, treat
+"tokenizer and model ship as a pair" as law.
+
+## Fine-tuning with Trainer
+
+Trainer is Day 26's idiomatic loop, hardened: device placement, gradient
+accumulation, mixed precision, checkpointing and logging are handled for you.
+
+```python
+from transformers import AutoModelForSequenceClassification, TrainingArguments, Trainer
+
+labels = ds.features["label"].names
+enc = ds.map(lambda b: tok(b["text"], truncation=True), batched=True)
+splits = enc.train_test_split(test_size=0.2, seed=0)
+
+model = AutoModelForSequenceClassification.from_pretrained(
+    "distilbert/distilbert-base-uncased", num_labels=len(labels)
+)
+args = TrainingArguments(
+    output_dir="artifacts/day32",
+    learning_rate=2e-5,                # fine-tuning rates are small: 2e-5, not 1e-1
+    per_device_train_batch_size=16,
+    num_train_epochs=2,
+    eval_strategy="epoch",
+)
+trainer = Trainer(model=model, args=args,
+                  train_dataset=splits["train"], eval_dataset=splits["test"])
+trainer.train()
+```
+
+Notice what did not change from Day 29: pretrained body, fresh head, small
+learning rate, few epochs. Text and images obey the same transfer-learning
+physics — for image tasks, swap in a [vision transformer](/papers) checkpoint
+and the recipe holds.
+
+<Callout kind="warn" title="Tokenizer and model are a matched pair">
+Every tokenizer owns a fixed vocabulary: id 4642 means whatever it meant
+during that model's pretraining. Feed a model ids from a different tokenizer
+and you hand it fluent garbage — no error, just quietly wrong predictions.
+Always load both from the same repository id.
+</Callout>
+
+## Resources
+
+- [Hugging Face — LLM Course, chapters 1–2](https://huggingface.co/learn/llm-course/chapter1/1) — the best written course in the ecosystem
+- [Transformers — Quickstart](https://huggingface.co/docs/transformers/quickstart)
+- [Datasets — Quickstart](https://huggingface.co/docs/datasets/quickstart)
+
+## Exercise
+
+1. Baseline first: run `pipeline("sentiment-analysis")` over 50 texts you
+   label yourself and score its accuracy.
+2. Fine-tune DistilBERT on the emotion dataset for two epochs as above;
+   compare against the baseline.
+3. Break it deliberately: tokenize a sentence with the `gpt2` tokenizer and
+   feed the ids to the DistilBERT model; observe the failure (an index beyond
+   the embedding table), explain it in a comment, then commit.
+
+<Quiz
+  question="Why must the tokenizer come from the same checkpoint as the model?"
+  options={["Because tokenizers are licensed per model", "Because each tokenizer has its own frozen vocabulary, and ids from another one index the wrong entries", "Because different tokenizers produce tensors of different dtypes", "Because the pipeline API refuses otherwise"]}
+  answer={1}
+  explanation="Token ids are indices into a specific embedding table built during pretraining. A different tokenizer's ids point at unrelated rows — the model receives plausible-looking garbage."
+/>

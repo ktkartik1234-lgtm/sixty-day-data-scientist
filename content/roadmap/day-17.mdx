@@ -1,0 +1,113 @@
+---
+day: 17
+title: "Decision trees and Random Forests"
+phase: 2
+minutes: 90
+objectives:
+  - "Explain Gini and entropy impurity and how greedy splitting uses them"
+  - "Control overfitting with depth and leaf-size, and read the train-test gap"
+  - "Use bagging, feature subsampling and the OOB score correctly"
+  - "Interpret feature importances with appropriate suspicion"
+tags: ["trees", "random-forest", "ensembles"]
+papers:
+  - "random-forests"
+---
+
+Logistic regression draws one straight boundary. A decision tree carves the
+feature space into rectangles with axis-aligned cuts — interpretable, but a
+single deep tree memorizes. The fix is an ensemble: Breiman's Random Forests
+(see [the paper](/papers)), still one of the best cost-to-performance trades
+in tabular ML.
+
+## Growing a tree greedily
+
+At each node, the algorithm tries every feature and every threshold, and
+keeps the split that most reduces **impurity**. For classification:
+
+$$G = 1 - \sum_{k} p_k^2 \quad \text{(Gini)}, \qquad H = -\sum_{k} p_k \log_2 p_k \quad \text{(entropy)}$$
+
+where $p_k$ is the fraction of class $k$ in the node. The score of a split is
+the parent impurity minus the weighted child impurity — information gain.
+Both formulas agree with intuition: a node that is all one class scores zero.
+
+```python
+from sklearn.tree import DecisionTreeClassifier, export_text
+
+tree = DecisionTreeClassifier(max_depth=3, min_samples_leaf=50, random_state=0)
+tree.fit(X_tr, y_tr)
+print(export_text(tree, feature_names=list(X.columns)))
+```
+
+Read the printed tree out loud once — it is the most explainable model you
+will meet this month.
+
+## Depth is the complexity dial
+
+```python
+for depth in range(1, 13):
+    t = DecisionTreeClassifier(max_depth=depth, random_state=0).fit(X_tr, y_tr)
+    print(depth, round(t.score(X_tr, y_tr), 3), round(t.score(X_te, y_te), 3))
+```
+
+Full depth reaches perfect training accuracy — that is memorization, not
+learning. Watch the test curve: it rises, peaks, then sags as the tree starts
+fitting noise. `max_depth`, `min_samples_leaf` and `min_samples_split` are the
+regularization knobs; tune them on validation data, never on the test set.
+
+## Bagging: many decorrelated trees
+
+A random forest grows hundreds of deep trees on **bootstrap** samples (rows
+drawn with replacement), and at every split considers only a **random subset
+of features** (about the square root of the feature count for classification).
+Averaging kills variance — but only if the trees disagree, which the feature
+subsampling forces. Each tree's bootstrap leaves about a third of rows out
+(**out-of-bag**), giving a free validation estimate:
+
+```python
+from sklearn.ensemble import RandomForestClassifier
+
+rf = RandomForestClassifier(
+    n_estimators=500, min_samples_leaf=2,
+    oob_score=True, n_jobs=-1, random_state=0,
+).fit(X_tr, y_tr)
+print("OOB:", rf.oob_score_)
+```
+
+<Callout kind="deep" title="Why the random feature subset is the whole trick">
+  Averaging b uncorrelated estimators cuts variance by a factor of b — but
+  averaging perfectly correlated ones cuts nothing: five copies of the same
+  mistake are still one mistake. Bootstrap rows alone leave trees highly
+  correlated, because one dominant feature wins the top split in almost every
+  tree. Forcing each split to consider different features decorrelates the
+  ensemble — that, more than the averaging, is why forests work.
+</Callout>
+
+## Feature importance, read with suspicion
+
+`rf.feature_importances_` measures impurity reduction attributed to each
+feature — and it is biased toward high-cardinality and continuous features,
+which get more chances to split. The honest check is permutation importance:
+shuffle one feature, watch the score drop, on held-out data.
+
+## Resources
+
+- [scikit-learn — decision trees user guide](https://scikit-learn.org/stable/modules/tree.html)
+- [scikit-learn — ensembles: forests](https://scikit-learn.org/stable/modules/ensemble.html#forests-of-randomized-trees)
+- [StatQuest — Decision and Classification Trees](https://www.youtube.com/watch?v=_L39rN6gz7Y)
+- [StatQuest — Random Forests](https://www.youtube.com/watch?v=J4Wdy0Wc_xQ)
+
+## Exercise
+
+1. Fit a full-depth tree on the capstone data; report the train–test accuracy
+   gap, then sweep max_depth from 1 to 12 and plot both curves.
+2. Train a 500-tree random forest with `oob_score=True`; compare OOB score,
+   test accuracy and the single tree's test accuracy.
+3. Compute impurity importances and permutation importance on held-out data;
+   name one feature whose rank changes and explain why in a sentence; commit.
+
+<Quiz
+  question="Why does a random forest consider only a random subset of features at each split?"
+  options={["Mostly to speed up training", "To decorrelate the trees, so that averaging actually reduces variance", "To stop individual trees from ever overfitting", "To compensate for bootstrapping the rows"]}
+  answer={1}
+  explanation="Without it, one dominant feature wins the top split in nearly every tree and the ensemble members are near-copies. Decorrelation is what lets averaging collapse variance — the row bootstrap alone does not achieve it."
+/>

@@ -1,0 +1,120 @@
+---
+day: 13
+title: "EDA and visualization: finding the story"
+phase: 2
+minutes: 75
+objectives:
+  - "Run the three passes — univariate, bivariate, multivariate — in order"
+  - "Choose histogram vs KDE, box vs violin, and scatter with hue deliberately"
+  - "Ship one stakeholder chart whose title states the finding"
+tags: ["eda", "visualization", "seaborn"]
+---
+
+Yesterday's cleaning decided what is *true*; today's EDA decides what is
+*interesting*. The discipline is three passes over the data, each asking a
+bigger question than the last.
+
+## Pass one: univariate — what does each column look like?
+
+```python
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+num_cols = df.select_dtypes("number").columns
+fig, axes = plt.subplots(2, 3, figsize=(14, 6))
+for ax, col in zip(axes.flat, num_cols[:6]):
+    sns.histplot(df[col], kde=True, ax=ax)
+    ax.set_title(col)
+plt.tight_layout()
+plt.show()
+
+sns.boxplot(data=df, x="employment_type", y="debt_to_income")
+sns.violinplot(data=df, x="stress_band", y="savings_ratio", inner="quartile")
+```
+
+A histogram counts honestly — gaps and spikes are real. A KDE smooths, and
+its bandwidth *invents* structure: it can erase a second mode or paint
+probability below zero. Look at both. Box plots compare a numeric column
+across groups compactly; violins add the shape back. Note skew here — heavy
+right tails are tomorrow's log-transform candidates.
+
+## Pass two: bivariate — how do pairs move together?
+
+```python
+sns.scatterplot(
+    data=df.sample(2000, random_state=0),
+    x="debt_to_income", y="savings_ratio",
+    hue="stress_level", alpha=0.4, palette="viridis",
+)
+```
+
+With alpha and sampling to beat overplotting, read the *boundary shape*. If
+high and low stress separate along a straight edge, linear models (Days 15–16)
+will do fine. If the separation is nested or curved, reach for trees and
+boosting (Days 17–18). The shape you see here is a prior on model choice.
+
+## Pass three: multivariate — the correlation heatmap
+
+```python
+corr = df[num_cols].corr()
+sns.heatmap(corr, annot=True, fmt=".2f", cmap="vlag", center=0)
+```
+
+Read it for two warnings, not for causes: pairs of features near plus or
+minus one will fight over credit in any linear model, and near-zero
+correlation with the target does *not* mean useless — relationships can hide
+in interactions that only a tree or an engineered ratio will surface.
+
+<Callout kind="deep" title="Anscombe's quartet, the EDA mission statement">
+  Four datasets with identical means, variances, correlations and regression
+  lines turn out to be four wildly different pictures — a line, a curve, a
+  row of points and one outlaw outlier. Every summary statistic is a lossy
+  compression of the joint distribution. Plot early, plot often, and never
+  let a clean `describe()` table convince you there is nothing to see.
+</Callout>
+
+## One chart for stakeholders, one snippet for you
+
+The stakeholder rule: one chart, one message, and the title *is* the message —
+"Stress rises sharply past a 40 percent debt-to-income ratio", never "Stress
+vs DTI". Annotate the reference line, cap hues at about three, and delete
+every legend the chart does not need.
+
+For yourself, script the three passes so they run on any new frame:
+
+```python
+def eda_snapshot(df, target):
+    """The three passes in one call — reuse on every new dataset."""
+    num = df.select_dtypes("number")
+    print("UNIVARIATE\n", num.describe().T[["mean", "std", "min", "max"]])
+    print("MOST SKEWED\n", num.skew().sort_values(ascending=False).head())
+    print("BIVARIATE: means by target\n",
+          df.groupby(target)[num.columns].mean().T.round(3))
+    for col in df.select_dtypes(["object", "category"]):
+        rate = df.groupby(col)[target].mean().sort_values(ascending=False)
+        print(f"{col}\n", rate.head(8).round(3))
+```
+
+## Resources
+
+- [seaborn tutorial](https://seaborn.pydata.org/tutorial.html)
+- [Kaggle Learn — Data Visualization](https://www.kaggle.com/learn/data-visualization)
+- [matplotlib gallery](https://matplotlib.org/stable/gallery/index.html)
+
+## Exercise
+
+1. Run `eda_snapshot` on the capstone dataset and write three sentences: the
+   strongest univariate surprise, the strongest bivariate signal, and one
+   suspiciously high feature–feature correlation.
+2. Build the box plot and the violin plot of debt-to-income across stress
+   bands; in one sentence, say which communicates the comparison better and
+   why.
+3. Produce the one stakeholder chart — annotated, finding-as-title — and
+   commit it with the sentence a reader should take away.
+
+<Quiz
+  question="Two datasets share the same means, variances and correlation. What can you conclude about their shapes?"
+  options={["They look the same when plotted", "Both relationships must be linear", "Nothing — summary statistics can hide radically different geometry", "One must be a rescaled copy of the other"]}
+  answer={2}
+  explanation="That is the whole point of Anscombe's quartet: identical first and second moments with four completely different shapes. Plots are not decoration — they are the only cheap test for structure that summaries cannot see."
+/>

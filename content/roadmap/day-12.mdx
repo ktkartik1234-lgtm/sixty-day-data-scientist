@@ -1,0 +1,130 @@
+---
+day: 12
+title: "Data cleaning: missing values, outliers and dtypes"
+phase: 2
+minutes: 90
+objectives:
+  - "Diagnose missingness as MCAR, MAR or MNAR before touching a single row"
+  - "Choose drop, impute or flag deliberately — and impute only on training data"
+  - "Detect outliers with IQR fences, z-scores and IsolationForest"
+  - "Fix dtypes and shrink memory with category, datetime and numeric coercion"
+tags: ["data-cleaning", "pandas", "sklearn"]
+---
+
+Yesterday you learned to slice and reshape; today you decide what survives into
+the model. Cleaning is not scrubbing — every decision here (drop, fill, cap)
+changes the distribution the model will see, so each one needs a reason.
+
+## Three kinds of missing
+
+- **MCAR** — missingness is unrelated to anything, observed or not (a sensor
+  died at random). Dropping rows is nearly harmless.
+- **MAR** — missingness is explained by *other observed* columns (young
+  respondents skip the savings question). Impute using those columns.
+- **MNAR** — missingness depends on the *unobserved value itself* (high
+  earners refuse to state income). No imputer fixes this; a flag column at
+  least preserves the signal.
+
+In the Financial Stress data, assume the worst until proven otherwise: what
+people decline to report about money is rarely random.
+
+```python
+miss = df.isna()
+print(miss.mean().sort_values(ascending=False).head())
+print(miss.corr().round(2))            # do missing flags co-occur?
+print(df.groupby("employment_type")["income"].apply(lambda s: s.isna().mean()))
+```
+
+If missingness varies strongly by group, you are looking at MAR — and the
+group pattern is itself a feature.
+
+## Drop, impute, or flag
+
+Decide per column, not per dataset. Drop rows only when a small MCAR fraction
+would otherwise poison training; drop a column when it is mostly missing;
+otherwise impute — and add an indicator when the fact of missing could matter:
+
+```python
+from sklearn.impute import SimpleImputer
+
+imp = SimpleImputer(strategy="median", add_indicator=True)
+X_imp = imp.fit_transform(df[["income", "debt", "age"]])
+print(imp.statistics_)          # the medians that were filled in
+```
+
+One rule overrides everything else: **fit the imputer on training rows only**
+and transform the rest. Fit on all data and the test rows have already told
+the imputer what the typical income is — a quiet leak (Day 19 makes this
+rigorous with pipelines).
+
+## Outliers: three detectors, one warning
+
+```python
+def iqr_fences(s, k=1.5):
+    q1, q3 = s.quantile([0.25, 0.75])
+    return q1 - k * (q3 - q1), q3 + k * (q3 - q1)
+
+lo, hi = iqr_fences(df["income"])
+print(((df["income"] < lo) | (df["income"] > hi)).mean())     # IQR flagged
+z = (df["income"] - df["income"].mean()) / df["income"].std()
+print((z.abs() > 3).mean())                                   # z-score flagged
+
+from sklearn.ensemble import IsolationForest                  # multivariate
+iso = IsolationForest(contamination=0.01, random_state=0)
+flags = iso.fit_predict(df[["income", "debt", "age"]])        # -1 = outlier
+```
+
+IQR fences and z-scores judge one column at a time; IsolationForest judges a
+row against the joint distribution (impute first — it cannot handle NaN).
+Use them to *find* points, not to *delete* them.
+
+<Callout kind="warn" title="Outliers are often the signal">
+  In financial data an extreme debt-to-income ratio is not a typo to scrub —
+  it is precisely the profile the model must catch. Cap or transform when a
+  value is *implausible* (negative age, income of 100 million); investigate
+  before deleting when it is *real*. Every deletion is an implicit claim that
+  the point cannot occur at prediction time.
+</Callout>
+
+## Dtypes are the cheapest performance win
+
+```python
+print(df.memory_usage(deep=True).sum() / 1e6, "MB before")
+
+for col in ["region", "employment_type"]:
+    df[col] = df[col].astype("category")          # codes + dictionary
+df["report_month"] = pd.to_datetime(df["report_month"])
+df["income"] = pd.to_numeric(df["income"], errors="coerce")
+
+print(df.memory_usage(deep=True).sum() / 1e6, "MB after")
+```
+
+`category` stores each distinct string once and speeds up `groupby`;
+`to_datetime` unlocks `.dt.year`, `.dt.month` and proper sorting; coercing
+text masquerading as numbers surfaces bad rows as NaN instead of crashing a
+model two days from now.
+
+## Resources
+
+- [pandas user guide — working with missing data](https://pandas.pydata.org/docs/user_guide/missing_data.html)
+- [scikit-learn — imputation of missing values](https://scikit-learn.org/stable/modules/impute.html)
+- [scikit-learn — novelty and outlier detection](https://scikit-learn.org/stable/modules/outlier_detection.html)
+
+## Exercise
+
+1. For each column with missing values in the capstone dataset, write one
+   sentence classifying it as MCAR, MAR or MNAR, with the evidence (group
+   rates, co-occurrence) that supports the call.
+2. Build two versions of the income column: a plain median imputation, and
+   `add_indicator=True` — then compare the mean of `target` between flagged
+   and unflagged rows.
+3. Winsorize income and debt at their 99th percentiles, convert two repeated
+   string columns to `category`, and record the memory delta in your commit
+   message.
+
+<Quiz
+  question="High earners tend to skip the income question, so the probability that income is missing depends on income itself. This mechanism is:"
+  options={["MCAR — missingness is completely random", "MAR — explained by other observed columns", "MNAR — driven by the unobserved value itself", "MNAR only if more than 20% of values are missing"]}
+  answer={2}
+  explanation="When missingness depends on the value that is missing, no amount of observed-column imputation recovers the truth — the visible sample is biased. A missing-flag column at least lets the model see who hid."
+/>

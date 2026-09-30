@@ -1,0 +1,58 @@
+---
+title: "Hello, 60 Days: why this challenge exists"
+description: "The rules of the game, how the roadmap is organized, and how to get the most out of the next two months."
+date: "2026-09-29"
+tags: ["meta", "learning"]
+---
+
+Most "learn data science" advice dies in tutorial hell. This project is built
+around one fix: **a fixed 60-day path, one day at a time, with the math and the
+papers attached to the days that need them.**
+
+## The shape of the journey
+
+Six phases, ten-ish days each:
+
+1. **Foundations** — the math and the Python toolchain.
+2. **Data & Classical ML** — pandas, SQL, scikit-learn, evaluation.
+3. **Deep Learning** — PyTorch from first principles to CNNs.
+4. **LLMs & GenAI** — transformers in practice: prompting, RAG, fine-tuning.
+5. **Agentic AI & MLOps** — tool use, then shipping models properly.
+6. **Capstone** — one end-to-end project from framing to deployment.
+
+<Callout kind="tip" title="How to use this site">
+  Each day links to the exact math lessons and papers you need *that day*. You
+  don't have to finish a math course before Day 1 — you learn the math when a
+  model demands it.
+</Callout>
+
+## Why math is non-negotiable
+
+Take gradient descent — the engine under nearly everything you'll train. The
+update rule is:
+
+$$\theta_{t+1} = \theta_t - \eta \, \nabla_\theta J(\theta_t)$$
+
+That one line uses derivatives (calculus), vectors and matrices (linear
+algebra), and a loss function $J(\theta)$ you'll learn to read statistically.
+Every phase of the roadmap points back to the [mathematics section](/math) at
+the moment you need it.
+
+## The contract
+
+<Callout kind="info" title="The rules">
+  1. One roadmap day per day. Don't binge, don't skip.
+  2. Every exercise gets typed into a real notebook — no mental execution.
+  3. When a day names a paper, skim it before moving on. Summaries help; the
+  original teaches pattern recognition for the literature.
+</Callout>
+
+Check your streak on the [roadmap page](/roadmap) — progress is stored in your
+browser, so it follows you on that machine.
+
+<Quiz
+  question="What's the recommended pace for the challenge?"
+  options={["All 60 days in one weekend", "One roadmap day per day, with its math and papers", "Only the phases you find interesting", "Read everything first, practice later"]}
+  answer={1}
+  explanation="The challenge is designed as a daily habit: consistent pace, exercises typed out, papers skimmed the day they're assigned."
+/>

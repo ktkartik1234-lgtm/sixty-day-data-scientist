@@ -1,0 +1,130 @@
+---
+title: "Convexity and loss landscapes"
+summary: "Why some losses have exactly one bottom and others are a terrain full of saddles — and why deep learning works anyway."
+order: 2
+---
+
+Gradient descent is only guaranteed to work if the terrain cooperates.
+Convexity is the precise way of saying the terrain is a single bowl, and it
+draws a real line in practice: some models train reliably with almost no
+tuning, while others demand every trick you know.
+
+## Convex sets and convex functions
+
+A set is convex if the line segment between any two of its points stays
+inside the set. A function is convex if the same idea holds for its graph —
+the chord between any two points lies on or above the curve:
+
+$$f\big(\lambda x + (1-\lambda)\,y\big) \;\le\;
+\lambda f(x) + (1-\lambda) f(y) \qquad \text{for all } \lambda \in [0, 1]$$
+
+Blend two inputs, and the loss at the blend is no worse than the blended
+losses. Quadratics like $x^2$, the absolute value and $e^x$ are convex;
+anything that dips, rises and dips again is not. Linear functions count too —
+the definition demands "on or above," and equality is allowed.
+
+## One bowl, one bottom
+
+Convexity collapses the optimization story into three clean statements:
+
+- **Every local minimum is the global minimum.** Two separate bottoms would
+  force the chord between them to dip below the curve, violating the
+  definition — so there is nothing better hiding elsewhere.
+- **Zero gradient is enough.** If $\nabla f(x^*) = 0$ and $f$ is convex, then
+  $x^*$ is a global minimum. No second-order checks, no second-guessing.
+- **Gradient descent converges** from any starting point, given a learning
+  rate small enough for the curvature — the quadratic analysis of the last
+  lesson generalizes to every convex loss.
+
+## The convex classics
+
+Linear regression with squared error is convex in the weights:
+
+$$J(w) = \lVert Xw - y \rVert^2$$
+
+an affine map composed with a squared norm — one bowl, which is why it even
+admits a closed-form solution, the normal equation
+$w = (X^\top X)^{-1} X^\top y$. Logistic regression's cross-entropy is
+convex in $w$ as well: train it twice from different initializations and you
+land on the same answer, which is exactly why it makes such a dependable
+baseline in the modeling days. The hinge loss behind SVMs is convex too.
+The fine print matters, though: convex *in the parameters* — a claim about
+the geometry you optimize over, not about your data.
+
+## Deep networks are non-convex — and it barely matters
+
+Stack two linear layers and the loss is already non-convex in the weights.
+Worse, the landscape is full of structure: swap two hidden units and the
+network computes an identical function — a permutation symmetry — so
+equivalent minima come in entire connected families. And in high dimensions,
+random critical points are overwhelmingly likely to be **saddle points**
+rather than minima: for a minimum, *every* curvature direction must be
+positive, and with thousands of independent directions that is exponentially
+unlikely (Dauphin et al., 2014).
+
+The saving grace, established empirically over years: good-enough minima are
+everywhere, and the global minimum is frequently the overfit one anyway.
+Training a deep network is not a hunt for the lowest point — it is a hunt for
+a basin that generalizes.
+
+<Callout kind="deep" title="Reading the terrain from the loss curve">
+  A long flat stretch followed by a sudden drop is the signature of a saddle
+  or plateau being escaped — not of a bug. It is also why "stuck" rarely
+  means "trapped in a local minimum" on modern networks: with noisy
+  mini-batches, saddles shake loose given steps big enough to roll off.
+  On convex problems the loss curve is boring on purpose; when it is not
+  boring on a deep net, reach for learning-rate and momentum tools before
+  questioning the architecture.
+</Callout>
+
+## What this means in practice
+
+- **Convex problems:** the solver does the work. Few knobs, initialization
+  does not matter, and convergence is a property of the problem, not of your
+  patience.
+- **Non-convex problems:** initialization, learning-rate schedule, batch
+  size and momentum become design decisions, because they decide *which
+  basin* you fall into.
+- **In both cases, the loss curve is your map** — flatness, oscillation and
+  cliffs all mean something specific about the terrain underneath.
+
+## Resources
+
+- [Boyd & Vandenberghe — Convex Optimization](https://web.stanford.edu/~boyd/cvxbook/) — the standard text; chapters 2 and 3 cover exactly this lesson.
+- [Dauphin et al. (2014) — Saddle point problem in high-dimensional non-convex optimization](https://arxiv.org/abs/1406.2572) — why saddles, not local minima, are the enemy.
+- [Stanford CS229 notes, part I](https://cs229.stanford.edu/notes/cs229-notes1.pdf) — linear and logistic regression derived as convex problems.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  Two candidate losses: $J_A(w_1, w_2) = w_1^2 + 10\,w_2^2$ and
+  $J_B(w_1, w_2) = w_1^2 - w_2^2$. Use the Hessian at the origin to classify
+  each critical point, and connect the eigenvalues to convexity.
+</Callout>
+
+<Solution>
+  Both gradients vanish at the origin, so both are critical points. The
+  Hessians (the matrix of second partials) are constant here:
+
+  $$H_A = \begin{bmatrix} 2 & 0 \\ 0 & 20 \end{bmatrix}, \qquad
+    H_B = \begin{bmatrix} 2 & 0 \\ 0 & -2 \end{bmatrix}$$
+
+  $H_A$ has eigenvalues $2$ and $20$ — both positive, so the origin is a
+  minimum. Since the eigenvalues are positive *everywhere*, $J_A$ is strictly
+  convex and that minimum is the unique global one.
+
+  $H_B$ has eigenvalues $+2$ and $-2$: the origin is a **saddle point**.
+  Descend along $w_1$ and you climb along $w_2$ — the eigenvectors of the
+  Hessian (the linear algebra track again) give the directions, the
+  eigenvalues the curvature in each.
+
+  The general lesson: convexity is exactly the statement that the Hessian
+  never has a negative eigenvalue in any direction — no ridges, only bowls.
+</Solution>
+
+<Quiz
+  question="Which statement about a convex loss function is true?"
+  options={["Every local minimum is the global minimum", "Gradient descent can get trapped in poor local minima", "It has many isolated but equivalent minima", "Its Hessian has at least one negative eigenvalue somewhere"]}
+  answer={0}
+  explanation="Convexity forces the chord between two hypothetical basins to dip below the curve, which the definition forbids — so any local minimum must be the global one. Many equivalent isolated minima are a deep-network phenomenon, and negative curvature anywhere means the function is not convex."
+/>

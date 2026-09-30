@@ -1,0 +1,120 @@
+---
+day: 49
+title: "MCP: the Model Context Protocol"
+phase: 5
+minutes: 75
+objectives:
+  - "Explain why a standard tool and context protocol beats point-to-point integrations"
+  - "Identify hosts, clients, servers, transports and the tools-resources-prompts split"
+  - "Build a tiny MCP server exposing calculator and CSV query tools"
+tags: ["mcp", "agents", "tools", "protocols"]
+---
+
+Yesterday your tools were private: they lived in the same Python process as
+the agent, callable by nobody else. The Model Context Protocol breaks that
+coupling — write a tool once as a small server, and every MCP-aware
+application can use it.
+
+## 1. Why a standard protocol matters
+
+Without a standard, every AI application (IDEs, chatbots, your own agent)
+must write custom glue for every data source and API it touches — an
+N-times-M integration problem. MCP, introduced by Anthropic in late 2024 and
+now adopted across many clients and tool vendors, collapses it to N plus M:
+applications implement the client side once; tools implement the server side
+once. Think USB-C instead of a drawer of cables.
+
+## 2. Anatomy: hosts, clients, servers, transports
+
+- **Host** — the AI application the user drives (Claude Desktop, an IDE, your
+  Day-48 agent).
+- **Client** — a connector inside the host, one per connected server.
+- **Server** — a small program exposing capabilities: tools to call, context
+  to read, prompts to offer.
+- **Transport** — stdio for a local subprocess (the common case) or
+  streamable HTTP for a remote server.
+
+Under the hood everything is JSON-RPC messages: an `initialize` handshake,
+`tools/list` to discover capabilities, `tools/call` to execute. Discovery is
+the quiet superpower — a client learns what a server offers at runtime, with
+no hard-coded schemas.
+
+## 3. Tools versus resources versus prompts
+
+MCP splits capabilities by *who controls them*:
+
+- **Tools** — model-controlled. Functions the model may call, side effects
+  allowed: run a query, send a message. The POST of the protocol.
+- **Resources** — application-controlled. Read-only context identified by
+  URIs: files, database rows, logs. The GET.
+- **Prompts** — user-controlled. Reusable templates the user picks
+  explicitly, like a slash command.
+
+Rule of thumb: if the model decides to use it, it is a tool; if the app
+injects it into context, it is a resource; if the user selects it, it is a
+prompt.
+
+## 4. Build: a tiny MCP server
+
+```python
+# mcp_server.py — pip install "mcp[cli]"  then:  mcp dev mcp_server.py
+from mcp.server.fastmcp import FastMCP
+import pandas as pd
+
+mcp = FastMCP("data-tools")
+
+@mcp.tool()
+def calculate(expression: str) -> str:
+    """Evaluate a basic arithmetic expression such as 2 * (3 + 4)."""
+    if not set(expression) <= set("0123456789+-*/(). "):
+        return "error: only basic arithmetic is supported"
+    return str(eval(expression))
+
+@mcp.tool()
+def csv_summary(path: str, column: str) -> str:
+    """Return count, mean and standard deviation of one numeric CSV column."""
+    df = pd.read_csv(path)
+    if column not in df.columns:
+        return f"error: column '{column}' not found; columns: {list(df.columns)}"
+    s = pd.to_numeric(df[column], errors="coerce").dropna()
+    return f"count={len(s)} mean={s.mean():.4f} std={s.std():.4f}"
+
+if __name__ == "__main__":
+    mcp.run()            # stdio transport by default
+```
+
+The decorator turns an ordinary function into a protocol-exposed tool; the
+docstring becomes the tool description (yesterday's rule still applies); and
+your code validates inputs before anything dangerous happens.
+
+<Callout kind="tip" title="Same server, every client">
+  That one file runs unchanged inside Claude Desktop, an IDE, or your own
+  Day-48 agent — tools written once are tools everywhere, which is the whole
+  point. The flip side: a server runs with your permissions. Treat a
+  third-party MCP server exactly like a package you would pip install —
+  read it before you connect it.
+</Callout>
+
+## Resources
+
+- [MCP specification](https://modelcontextprotocol.io/specification/latest) — primitives, transports and lifecycle, precisely.
+- [Model Context Protocol docs](https://modelcontextprotocol.io) — quickstarts for servers and clients.
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) — the FastMCP server used above.
+
+## Exercise
+
+1. Run the server with the MCP inspector (`mcp dev mcp_server.py`), list its
+   tools, and call `calculate` with one valid and one rejected expression.
+2. Add a third tool, `csv_histogram`, that returns bin counts for a numeric
+   column, and confirm it appears in `tools/list` without touching the
+   client.
+3. Connect the server to a real host (Claude Desktop, an IDE extension, or
+   your Day-48 agent) and drive a prompt that triggers both the CSV and the
+   calculator tools. Commit the server and a log of the exchange.
+
+<Quiz
+  question="Your application wants to inject read-only log files into context, with the app — not the model — deciding when. Which MCP primitive fits?"
+  options={["A tool", "A resource", "A prompt", "A transport"]}
+  answer={1}
+  explanation="Resources are application-controlled, read-only context addressed by URI; tools are model-controlled actions, and prompts are user-selected templates."
+/>

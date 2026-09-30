@@ -1,0 +1,150 @@
+---
+day: 57
+title: "Feature engineering and model selection"
+phase: 6
+minutes: 90
+objectives:
+  - "Climb the baseline ladder: majority class, then logistic, then boosted trees"
+  - "Build encoding and imputation pipelines that cannot leak"
+  - "Engineer panel features: trends, ratios and volatility from the monthly history"
+  - "Wrap every model comparison in one reusable cross-validation harness"
+tags: ["feature-engineering", "gradient-boosting", "pipelines", "cross-validation"]
+papers:
+  - "xgboost"
+  - "random-forests"
+---
+
+Yesterday's audit said what the data can be trusted for; today you turn it
+into features and get the first honest answer to "how well can this be
+predicted?" (`X` and `y` below mean the training portion from Day 55.)
+
+## The baseline ladder
+
+Three rungs, evaluated identically, in order:
+
+1. **Majority class** — always "no stress": accuracy 0.85, PR-AUC equal to
+   the prevalence. It proves the metrics are wired up.
+2. **Logistic regression** — linear signal over standardized, encoded
+   features: cheap, interpretable.
+3. **Gradient-boosted trees** — the tabular workhorse (the XGBoost paper's
+   regularized second-order boosting; Breiman's random forests are its
+   closest rival), earning complexity only by beating rung 2.
+
+```python
+from sklearn.dummy import DummyClassifier
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
+
+models = {
+    "majority": DummyClassifier(strategy="most_frequent"),
+    "logistic": LogisticRegression(max_iter=2000),
+    "boosted": XGBClassifier(
+        n_estimators=400, learning_rate=0.05, max_depth=5,
+        subsample=0.9, colsample_bytree=0.8, eval_metric="aucpr",
+        random_state=42,
+    ),
+}
+```
+
+## Pipelines that cannot leak
+
+Every preprocessing step — imputation, scaling, one-hot encoding — must be
+**fit inside the cross-validation fold**, exactly like the model. Hand-fit
+encoders leak; a `Pipeline` plus `ColumnTransformer` makes the bug impossible:
+
+```python
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+numeric = X.select_dtypes("number").columns.tolist()
+categorical = X.select_dtypes("object").columns.tolist()
+
+preprocess = ColumnTransformer(
+    transformers=[
+        ("num", Pipeline([("impute", SimpleImputer(strategy="median")),
+                          ("scale", StandardScaler())]), numeric),
+        ("cat", OneHotEncoder(handle_unknown="ignore",
+                              min_frequency=0.01), categorical),
+    ]
+)
+```
+
+Two serving-time details: `handle_unknown="ignore"` turns an unseen region
+into zeros, and `min_frequency` lumps rare categories together.
+
+## Engineering the monthly panel
+
+The raw columns are six snapshots of the same behaviours, and stress lives
+in *dynamics*. Compress each panel into levels, trends and ratios:
+
+```python
+def add_panel_features(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    bal = [f"m{m}_daily_avg_bal" for m in range(1, 7)]
+    out["bal_trend"] = out["m1_daily_avg_bal"] - out["m6_daily_avg_bal"]
+    out["bal_volatility"] = out[bal].std(axis=1)
+    deposits = sum(out[f"m{m}_deposit_total_value"] for m in range(1, 7))
+    withdrawals = sum(out[f"m{m}_withdraw_total_value"] for m in range(1, 7))
+    out["withdraw_to_deposit"] = withdrawals / (deposits + 1.0)
+    received = sum(out[f"m{m}_received_total_value"] for m in range(1, 7))
+    out["inflow_to_outflow"] = received / (withdrawals + 1.0)
+    return out
+```
+
+A falling, volatile balance with withdrawals outrunning deposits is the
+classic stress signature — domain reasoning, not just more columns. Re-run
+the Day 55 AUC scan on every new feature; engineered features can leak too.
+
+## One CV harness to rule them all
+
+Write it once, use it for every comparison this week — same folds, same
+metrics, no ad-hoc evaluation:
+
+```python
+from sklearn.model_selection import StratifiedKFold, cross_validate
+
+def cv_harness(model, X, y, scoring=("average_precision", "roc_auc")):
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    res = cross_validate(model, X, y, cv=cv, scoring=scoring, n_jobs=-1)
+    return {k.replace("test_", ""): f"{v.mean():.3f} +/- {v.std():.3f}"
+            for k, v in res.items() if k.startswith("test_")}
+
+for name, clf in models.items():
+    pipe = Pipeline([("prep", preprocess), ("clf", clf)])
+    print(name, cv_harness(pipe, X, y))
+```
+
+Record the table in the README: boosted trees should beat logistic, logistic
+should crush majority; a rung failing to beat the one below is a finding.
+
+<Callout kind="deep" title="Feature importance is a leakage alarm too">
+  After fitting the boosted model, check permutation importance before
+  admiring it. One feature towering over everything else is usually a bug —
+  a leak, a duplicate column, a proxy for the target — not a discovery.
+  Impurity importances overstate high-cardinality features; prefer
+  permutation importance on held-out folds: treat the top as an audit queue.
+</Callout>
+
+## Resources
+
+- [XGBoost — the paper](https://arxiv.org/abs/1603.02754)
+- [Breiman — Random Forests](https://link.springer.com/article/10.1023/A:1010933404324)
+- [scikit-learn — ColumnTransformer and pipelines](https://scikit-learn.org/stable/modules/compose.html#column-transformer)
+
+## Exercise
+
+1. Run the full ladder through the harness and paste the resulting table
+   into the README; add one sentence on the size of the gap between rungs.
+2. Add the panel features, re-run the harness, and report which engineered
+   features enter the top ten by permutation importance.
+3. Tune the boosted model modestly (depth 3–7, learning rate 0.02–0.1, 200–600
+   trees) inside the harness; keep the complexity only if the gain is clear.
+
+<Quiz
+  question="You fit StandardScaler and OneHotEncoder on the whole training set before running cross-validation. What exactly is wrong?"
+  options={["Nothing — preprocessing is not modeling", "Scaler statistics and category vocabularies leak from validation folds into the transform", "It only breaks for tree models", "Cross-validation requires the data to be unscaled"]}
+  answer={1}
+  explanation="Each fold must simulate unseen data, including for preprocessing. Statistics learned from rows you validate on — means, scales, category lists — inflate the scores. A Pipeline inside cross_validate makes the leak structurally impossible."
+/>

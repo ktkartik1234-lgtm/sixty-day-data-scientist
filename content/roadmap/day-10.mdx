@@ -1,0 +1,107 @@
+---
+day: 10
+title: "Foundations checkpoint: a complete mini analysis"
+phase: 1
+minutes: 90
+objectives:
+  - "Run the full loop: load, clean, describe, visualize, test, report, commit"
+  - "Combine the tools of days 1 through 9 in one coherent notebook"
+  - "Write findings in plain language a stakeholder could read"
+tags: ["pandas", "statistics", "workflow"]
+blog:
+  - "hello-60-days"
+---
+
+Yesterday a gradient descent loop turned math into a working trainer. Today
+you zoom out: **no new theory**. The point is that days 1–9 compose into an
+actual analysis — the exact loop you will scale up for the rest of the
+challenge. Phase 1 closes when this is committed.
+
+## The brief
+
+1. Pick one CSV — the Financial Stress dataset under `../data/` is ideal
+   (Day 1's callout pointed at it; today it earns its keep).
+2. Clean it: drop or fill missing values, remove impossible rows.
+3. Describe it: shapes, dtypes, summary statistics.
+4. Visualize two things worth seeing.
+5. Run **one** pre-declared hypothesis test.
+6. Write exactly five findings bullets in plain English.
+7. Commit notebook, findings, and figure on a branch, then merge.
+
+## The skeleton
+
+Adapt the column names to your CSV; the shape of the script is the lesson.
+
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import stats
+
+df = pd.read_csv("data/financial_stress.csv")
+
+# 1. clean — day 1 habits
+df = df.dropna(subset=["monthly_income", "stress_level"])
+df = df[df["monthly_income"] > 0]
+print("kept", df.shape[0], "rows of", df.shape[1], "columns")
+
+# 2. describe
+print(df[["monthly_income", "stress_level"]].describe().T)
+
+# 3. visualize — two views, one figure
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+axes[0].hist(df["monthly_income"], bins=40)
+axes[0].set_title("Income distribution")
+axes[1].scatter(df["monthly_income"], df["stress_level"], alpha=0.2, s=8)
+axes[1].set_title("Income vs stress")
+plt.savefig("day10_overview.png", dpi=120, bbox_inches="tight")
+
+# 4. one hypothesis test, declared in advance: does stress differ
+# between the lower and upper income halves? — day 8's Welch test
+median_income = df["monthly_income"].median()
+low  = df.loc[df["monthly_income"] <= median_income, "stress_level"]
+high = df.loc[df["monthly_income"] >  median_income, "stress_level"]
+t, p = stats.ttest_ind(low, high, equal_var=False)
+se = np.sqrt(low.var() / len(low) + high.var() / len(high))   # day 6
+print(f"gap = {high.mean() - low.mean():.3f}, SE = {se:.3f}, t = {t:.2f}, p = {p:.2e}")
+```
+
+## From p-value to finding
+
+A test result becomes a finding only after two honest checks. **Size**: with
+50,000 rows almost any gap is "significant" — report the gap and its standard
+error, not just the p-value. **Words**: each bullet must survive being read
+by someone who will never open the notebook. "High-income respondents score
+1.2 points lower on stress (SE 0.1); the gap is unlikely to be chance
+(p near 0), but income explains little of the variation overall."
+
+<Callout kind="tip" title="The deliverable is the narrative">
+  The notebook proves you did the work; the five bullets prove you understood
+  it. If writing them is hard, that difficulty is the signal — it usually
+  means the cleaning or the test choice deserves another look, not that the
+  writing is the problem. The founding essay in the blog track
+  (**[Hello, 60 days](/blog)**) makes the same argument for the whole journey.
+</Callout>
+
+## Resources
+
+- [10 minutes to pandas](https://pandas.pydata.org/docs/user_guide/10min.html) — every dataframe move you need today.
+- [Matplotlib cheatsheets](https://matplotlib.org/cheatsheets/) — one page for the two plots above.
+- [scipy.stats reference](https://docs.scipy.org/doc/scipy/reference/stats.html) — `ttest_ind` and its options.
+
+## Exercise
+
+1. Complete the full analysis end-to-end on the Financial Stress CSV (or a
+   dataset of your own): clean, describe, plot, test, and save the figure.
+2. Write `FINDINGS.md` with exactly five bullets: two descriptive, two
+   inferential (the test plus the effect size), and one caveat or next step.
+3. Put notebook, findings, and figure on a branch, commit with a descriptive
+   message, merge to `main`, push, and tag the state with
+   `git tag phase-1-checkpoint`. Phase 1 is done.
+
+<Quiz
+  question="Your t-test on 50,000 rows returns p = 0.04 for a 0.1-point difference on a 10-point stress scale. The most honest finding is:"
+  options={["A large and important effect was discovered", "The difference is statistically significant but practically tiny — report the effect size and its uncertainty", "The test failed and must be rerun with more data", "P-values cannot be computed on 0-to-10 scales"]}
+  answer={1}
+  explanation="With large n, tiny effects clear any alpha threshold. Significance answers 'is chance a good explanation?' — importance needs the effect size, its standard error, and the scale it lives on."
+/>

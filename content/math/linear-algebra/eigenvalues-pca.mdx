@@ -1,0 +1,133 @@
+---
+title: "Eigenvalues and PCA"
+summary: "The directions a transformation cannot turn: eigenvectors and eigenvalues, the covariance matrix, and how Principal Component Analysis compresses data into the axes that matter."
+order: 3
+---
+
+Every square matrix has directions it treats specially: vectors it only
+stretches, never rotates. Find them and you have found the skeleton of the
+transformation — and, as it turns out, of your dataset.
+
+## Invariant directions
+
+For a square matrix $A$, a nonzero vector $\mathbf{v}$ is an eigenvector with
+eigenvalue $\lambda$ when:
+
+$$A\mathbf{v} = \lambda \mathbf{v}$$
+
+$A$ does not rotate $\mathbf{v}$ off its line; it only scales it by $\lambda$.
+A $\lambda$ greater than 1 stretches the direction, one between 0 and 1
+squashes it, and a negative $\lambda$ flips it. Eigenvectors point along the
+axes a transformation cares about; eigenvalues say how much.
+
+When a matrix has a full set of eigenvectors, stack them as the columns of
+$V$ and the eigenvalues into $\Lambda = \text{diag}(\lambda_1, \dots, \lambda_d)$.
+Then:
+
+$$A = V \Lambda V^{-1}$$
+
+Viewed from the eigenbasis, the transformation is pure stretching along the
+coordinate axes — no mixing. That is what makes eigendecomposition the master
+key for powers of a matrix, for solving dynamical systems, and, in a moment,
+for PCA.
+
+## The covariance matrix
+
+For centered data $X_c \in \mathbb{R}^{n \times d}$ (each feature shifted to
+mean zero), the sample covariance matrix is:
+
+$$S = \frac{1}{n - 1} X_c^\top X_c \in \mathbb{R}^{d \times d}$$
+
+Entry $S_{ij}$ measures how feature $i$ and feature $j$ vary together, and the
+diagonal holds the per-feature variances. $S$ is always symmetric and positive
+semi-definite, which guarantees its eigenvalues are real and non-negative —
+a fact PCA silently relies on.
+
+## PCA is eigendecomposition of the covariance
+
+PCA asks: along which single direction does the data vary the most? That
+direction is the top eigenvector of $S$, and the variance captured along it is
+the matching eigenvalue. Sorting eigenvectors by eigenvalue gives principal
+components in order of importance. The **explained variance ratio** of
+component $i$ is:
+
+$$\text{EVR}_i = \frac{\lambda_i}{\sum_{j=1}^{d} \lambda_j}$$
+
+Projecting onto the top $k$ eigenvectors keeps a fraction
+$\sum_{i=1}^{k} \text{EVR}_i$ of the total variance while shrinking the data
+from $d$ dimensions to $k$.
+
+Read that again with the previous lesson in mind: PCA is hunting for a
+rotation of the coordinate system that makes the covariance matrix diagonal.
+In the rotated frame, features are uncorrelated by construction and the axes
+are ordered by variance. The eigenvectors are the rotation; the eigenvalues
+are its diagonal.
+
+## A four-step PCA recipe
+
+1. **Center** the data: subtract each feature's mean, giving $X_c$.
+2. **Compute** the covariance matrix $S = \frac{1}{n-1} X_c^\top X_c$.
+3. **Eigendecompose** $S$ and sort eigenvectors by decreasing eigenvalue.
+4. **Project**: stack the top $k$ eigenvectors into $W_k \in \mathbb{R}^{d \times k}$ and output $Z = X_c W_k$.
+
+In code this is one call — `np.linalg.eig(S)` — though scikit-learn's `PCA`
+runs SVD on the centered matrix instead, which is the same answer computed
+more stably.
+
+How large should $k$ be? Two honest answers: pick $k$ so the cumulative
+explained variance $\sum_{i=1}^{k} \text{EVR}_i$ crosses a target such as
+0.95, or eyeball a scree plot — the graph of eigenvalues in decreasing order —
+and stop at the elbow where extra components stop paying rent. Both are
+heuristics; neither is a law.
+
+<Callout kind="deep" title="Why ML leans on PCA">
+  High-dimensional data is usually trapped near a low-dimensional subspace:
+  pixels, genes, and embeddings carry far fewer effective degrees of freedom
+  than their dimensions suggest. PCA finds that subspace without any labels,
+  which is why it powers compression, noise filtering, de-correlating features
+  before clustering, and the 2D scatter plot of every embedding you will ever
+  inspect.
+</Callout>
+
+## Resources
+
+- [3Blue1Brown — Eigenvectors and eigenvalues](https://www.youtube.com/watch?v=PFDu9oVAE-g) — the geometric picture in 17 minutes.
+- [StatQuest — PCA step-by-step](https://www.youtube.com/watch?v=FgakZw6K1QQ) — from covariance matrix to scree plot, gently.
+- [MIT OCW 18.06 — Gilbert Strang](https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/) — lecture 21 on eigenvalues, lecture 29 on the SVD.
+- [Khan Academy — Eigen-everything](https://www.khanacademy.org/math/linear-algebra/eig-vectors-and-eigenspaces) — practice finding them by hand.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  A dataset with two centered features has covariance matrix
+  $S = \begin{bmatrix} 5 & 2 \\ 2 & 2 \end{bmatrix}$. Find the eigenvalues,
+  the first principal component, and the fraction of variance it explains.
+</Callout>
+
+<Solution>
+  Solve the characteristic equation $\det(S - \lambda I) = 0$:
+
+  $$\det\begin{bmatrix} 5 - \lambda & 2 \\ 2 & 2 - \lambda \end{bmatrix} = (5-\lambda)(2-\lambda) - 4 = \lambda^2 - 7\lambda + 6 = 0$$
+
+  which factors as $(\lambda - 6)(\lambda - 1) = 0$, so $\lambda_1 = 6$ and
+  $\lambda_2 = 1$. For the first eigenvector, solve $(S - 6I)\mathbf{v} =
+  \mathbf{0}$:
+
+  $$\begin{bmatrix} -1 & 2 \\ 2 & -4 \end{bmatrix}\mathbf{v} = \mathbf{0} \implies v_1 = 2 v_2 \implies \mathbf{v}_1 = \frac{1}{\sqrt{5}}\begin{bmatrix} 2 \\ 1 \end{bmatrix}$$
+
+  The first principal component points along $[2, 1]^\top$ and explains
+
+  $$\text{EVR}_1 = \frac{\lambda_1}{\lambda_1 + \lambda_2} = \frac{6}{7} \approx 0.857$$
+
+  of the variance. The second component,
+  $[1, -2]^\top / \sqrt{5}$, picks up the remaining 14.3% — and the two
+  eigenvectors are exactly orthogonal, as they always are for a symmetric
+  matrix.
+</Solution>
+
+<Quiz
+  question="In PCA, the eigenvalues of the covariance matrix tell you…"
+  options={["The correlation between each pair of features", "The amount of variance captured along each principal axis", "The number of clusters in the data", "The learning rate to use on the projected data"]}
+  answer={1}
+  explanation="Each eigenvalue equals the variance of the data projected onto its eigenvector, so the explained variance ratio is lambda_i divided by the sum of all eigenvalues."
+/>

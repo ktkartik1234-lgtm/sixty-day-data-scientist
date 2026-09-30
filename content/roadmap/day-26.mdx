@@ -1,0 +1,144 @@
+---
+day: 26
+title: "The training loop: datasets, loaders and optimizers"
+phase: 3
+minutes: 90
+objectives:
+  - "Wrap data in a Dataset and iterate with a DataLoader"
+  - "Explain why minibatch gradients work despite being noisy"
+  - "Compare SGD, SGD with momentum and Adam"
+  - "Write a complete idiomatic train and evaluate loop"
+tags: ["pytorch", "training", "optimizers", "phase-3"]
+math:
+  - "optimization/learning-rate-momentum"
+---
+
+Yesterday you took one training step by hand. Today you industrialize it: the
+loop below is scaffolding you will reuse every remaining day of this phase,
+and the optimizer menu is the
+**[learning rate and momentum](/math/optimization/learning-rate-momentum)**
+lesson made executable.
+
+## Dataset and DataLoader
+
+```python
+from torch.utils.data import Dataset, DataLoader
+
+class Spirals(Dataset):
+    def __init__(self, X, y):
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.long)
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, i):
+        return self.X[i], self.y[i]
+
+loader = DataLoader(Spirals(X, y), batch_size=32, shuffle=True)
+xb, yb = next(iter(loader))
+print(xb.shape, yb.shape)    # torch.Size([32, 2]) torch.Size([32])
+```
+
+A Dataset answers "give me item i"; a DataLoader batches, shuffles, and (with
+more workers) loads data in parallel while the GPU computes. For tensors
+already in memory, `TensorDataset` does the same job in one line.
+
+## Batches and epochs: noisy gradients, cheap steps
+
+One pass over the data is an **epoch**; each parameter update uses one
+**batch**. The batch gradient is a noisy but unbiased estimate of the true one:
+
+$$\nabla \mathcal{L}_{\text{batch}}(\theta) \approx \nabla \mathcal{L}(\theta)$$
+
+Noisier is not worse: the jitter helps escape shallow basins and saddles, and
+small batches mean many cheap steps instead of few expensive ones. The knob is
+`batch_size`, and it interacts with the learning rate — bigger batches can
+often afford bigger steps.
+
+## SGD, momentum, Adam
+
+Plain SGD steps along the raw gradient. Momentum instead accumulates an
+exponentially weighted velocity:
+
+$$v_{t+1} = \beta v_t + \nabla_\theta \mathcal{L}(\theta_t), \qquad \theta_{t+1} = \theta_t - \eta\, v_{t+1}$$
+
+Consistent directions accumulate speed; oscillating ones cancel out. Adam goes
+further with per-parameter adaptivity: it keeps running estimates of each
+parameter's gradient mean and variance and rescales each coordinate's step —
+the pragmatic default when you have no time to tune.
+
+```python
+sgd    = torch.optim.SGD(model.parameters(), lr=0.1)
+moment = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+adam   = torch.optim.Adam(model.parameters(), lr=1e-3)
+```
+
+Same model, three behaviors; swapping is one line.
+
+## The idiomatic loop
+
+```python
+import torch.nn as nn
+
+loss_fn = nn.CrossEntropyLoss()
+
+def train_one_epoch(model, loader, opt):
+    model.train()
+    running = 0.0
+    for xb, yb in loader:
+        xb, yb = xb.to(device), yb.to(device)
+        opt.zero_grad()                    # 1. clear old gradients
+        loss = loss_fn(model(xb), yb)      # 2. forward
+        loss.backward()                    # 3. backward (Day 24, automated)
+        opt.step()                         # 4. update parameters
+        running += loss.item() * len(yb)
+    return running / len(loader.dataset)
+
+@torch.no_grad()
+def evaluate(model, loader):
+    model.eval()
+    correct = total = 0
+    for xb, yb in loader:
+        xb, yb = xb.to(device), yb.to(device)
+        correct += (model(xb).argmax(dim=1) == yb).sum().item()
+        total += len(yb)
+    return correct / total
+
+for epoch in range(10):
+    tr = train_one_epoch(model, loader, moment)
+    print(f"epoch {epoch}  train loss {tr:.4f}")
+```
+
+Four lines in the inner loop — zero, forward, backward, step. Nearly every
+training script you will ever read is a decorated version of this one.
+
+<Callout kind="tip" title="The learning rate outranks everything">
+Architecture and optimizer choices matter, but nothing moves results like the
+learning rate. Sweep it on a log scale — 1e-4, 3e-4, 1e-3, 3e-3 — before
+touching anything else. Loss that explodes or plateaus immediately: too high.
+Loss that crawls: too low. No regularizer or fancier architecture rescues a
+wrong step size.
+</Callout>
+
+## Resources
+
+- [PyTorch — Datasets and DataLoaders](https://pytorch.org/tutorials/beginner/basics/data_tutorial.html)
+- [PyTorch — torch.optim](https://pytorch.org/docs/stable/optim.html) — every optimizer's exact update rule
+- [CS231n — Neural Networks Part 3: Learning and Evaluation](https://cs231n.github.io/neural-networks-3/) — sanity checks and learning-rate practice
+
+## Exercise
+
+1. Train the spiral MLP with all three optimizers at their defaults, log the
+   loss curves, and rank them.
+2. Time epochs at batch sizes 8, 32 and 128; note wall-clock per epoch *and*
+   final loss — measure, do not guess.
+3. Split off 20 percent validation data, print `evaluate()` after every epoch,
+   and commit the notebook with a one-line takeaway.
+
+<Quiz
+  question="What does momentum add to plain SGD?"
+  options={["Per-layer learning rates", "An exponentially weighted average of past gradients, so consistent directions accelerate and oscillations cancel", "Automatic early stopping", "Gradient clipping for stability"]}
+  answer={1}
+  explanation="Momentum keeps a running velocity: updates that point the same way reinforce each other while zig-zag components average out, which speeds up ravines and damps noise."
+/>

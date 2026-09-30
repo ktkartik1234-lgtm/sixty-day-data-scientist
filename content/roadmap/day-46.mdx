@@ -1,0 +1,124 @@
+---
+day: 46
+title: "Phase 4 recap: your GenAI portfolio piece"
+phase: 4
+minutes: 90
+objectives:
+  - "Turn the day-45 bot into a publishable portfolio artifact"
+  - "Write a README with results, a word-diagram architecture and a cost table"
+  - "State limitations honestly and run a publish checklist"
+tags: ["llm", "portfolio", "recap", "genai", "phase-4"]
+blog:
+  - "hello-60-days"
+---
+
+Yesterday you shipped a working bot; today you turn it into evidence. A
+portfolio piece is not the code — it is the README, the numbers, and the
+honesty about limitations that makes the numbers believable.
+
+## What a reviewer sees in 90 seconds
+
+Open your repo as a stranger would. The title should carry the one-line
+result, the architecture should be graspable without scrolling, and the cost
+and eval tables should be one screen away. "Built a RAG chatbot" is one line
+in a sea of repos; the decimals are what separate you from them.
+
+## The README skeleton
+
+```text
+# Domain Q&A bot with RAG
+
+One-liner: answers questions over [corpus] with grounded citations.
+Result: hits@3 = 0.90, citation accuracy = 0.87, cost = 0.4 cents per question.
+
+## Architecture
+user question -> embed (MiniLM, 384d, unit norm)
+              -> cosine top-50 over all chunks (single matmul)
+              -> cross-encoder rerank to top-3
+              -> grounded prompt with numbered sources
+              -> LLM at temperature 0 -> citation check
+              -> answer with [n] citations, or NOT_IN_SOURCES
+
+## Evaluation
+10 gold questions, 3 refusal checks. Full table + failure analysis below.
+
+## Limitations
+- 10-question eval: small n, no inter-annotator agreement measured.
+- Brute-force search: fine at this scale; needs ANN past ~100k chunks.
+- Regex PII masking is a baseline, not production (day 44).
+
+## Run it
+pip install -r requirements.txt && python bot.py --corpus docs/
+```
+
+## Architecture diagram in words
+
+Image diagrams rot; prose arrows with contracts survive review. For each
+box, state what enters, what leaves, and how it fails: ingest (text in,
+chunks plus metadata out — fails on scanned PDFs), index (chunks in,
+normalized matrix out — fails if embeddings are not unit norm), retrieve
+(query in, top-k with scores out — fails silently on out-of-domain
+questions), generate (prompt in, cited answer out — fails by confabulation
+when sources are thin), guard (answer in, verified answer or refusal out).
+A reviewer reads that in one pass.
+
+## The cost table
+
+$$C_{1k} = 1000 \times (n_{in} \cdot p_{in} + n_{out} \cdot p_{out})$$
+
+```python
+def per_question_cost(tokens_in, tokens_out, p_in=3e-6, p_out=15e-6):
+    return tokens_in * p_in + tokens_out * p_out
+
+rag      = per_question_cost(2500, 300)     # citations inflate input tokens
+long_ctx = per_question_cost(20000, 300)    # whole corpus in the window
+print(rag, long_ctx)                        # the day-39 comparison, in dollars
+```
+
+Fill both numbers from your day-45 logs, project to a realistic monthly call
+volume, and show the ablation you rejected next to the one you shipped.
+
+## Limitations and the publish checklist
+
+Limitations first, fearlessly: the eval is small (n = 10), there is no
+reranker unless you added one, single embedding model, an injection surface
+the moment tools get attached, and a corpus with licensing terms you should
+name. Then publish:
+
+- Eval table in the README with method and sample size.
+- Model versions and seeds pinned; config file committed.
+- `.env` and `data/` excluded; no keys anywhere in history.
+- LICENSE chosen; `requirements.txt` frozen.
+- One failure case analyzed in public — it buys more trust than ten wins.
+
+<Callout kind="tip" title="Numbers or it didn't happen">
+  You spent twelve days earning decimals: hits@k from Day 38, costs from
+  Day 36, the escalation verdict from Day 39, the safety checklist from Day
+  44. Put them in the README where a reviewer sees them in one screen — a
+  repo with numbers and named limitations reads as an engineer's work, not
+  a tutorial's.
+</Callout>
+
+## Resources
+
+- [GitHub: About READMEs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes) — the front door conventions.
+- [Hugging Face model cards guide](https://huggingface.co/docs/hub/model-cards) — the community standard for documenting intended use and limits.
+- [Releasing research code](https://github.com/paperswithcode/releasing-research-code) — a checklist culture worth borrowing.
+
+## Exercise
+
+1. Write the README using the skeleton: results table, word-diagram, cost
+   table with both architectures, limitations. Push it.
+2. Fill the cost table from your day-45 logs — per-question tokens measured,
+   not guessed — plus the long-context comparison number and the monthly
+   projection at your stated call volume.
+3. Thirty-minute stranger test: hand the repo to someone with fresh eyes and
+   ask three questions — what does it do, how well, at what cost. Fix
+   whatever they could not answer from the README alone.
+
+<Quiz
+  question="What most raises a GenAI portfolio project's credibility with reviewers?"
+  options={["A sleek hosted web demo", "More lines of code and more features", "Reported evaluation numbers with method and sample size, plus honest limitations", "Using the newest model release"]}
+  answer={2}
+  explanation="Method-stated numbers and named limitations signal engineering discipline; demos and model novelty are commodities. The README tables are what a reviewer can trust."
+/>

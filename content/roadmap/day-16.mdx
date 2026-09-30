@@ -1,0 +1,104 @@
+---
+day: 16
+title: "Logistic regression and the metrics that matter"
+phase: 2
+minutes: 90
+objectives:
+  - "Explain the sigmoid, log-odds and what a logistic coefficient means"
+  - "Build confusion matrices and precision, recall and F1 at any threshold"
+  - "Decide between ROC-AUC and PR-AUC as a headline metric"
+tags: ["classification", "metrics", "sklearn"]
+math:
+  - "probability/bayes-rule"
+---
+
+Yesterday predicted a number; most questions that matter are yes-or-no. Will
+this household report financial stress next quarter? Logistic regression
+answers with a probability — and the metrics you choose decide whether that
+probability is judged fairly.
+
+## From line to probability
+
+A linear model can output 1.7 or minus 0.3 — not a probability. Squash it
+through the sigmoid and the model becomes linear in *log-odds*:
+
+$$z = \beta^\top x, \qquad p = \sigma(z) = \frac{1}{1 + e^{-z}}, \qquad \log \frac{p}{1 - p} = \beta^\top x$$
+
+Two consequences worth memorizing. First, a coefficient is a change in
+log-odds: $e^{\beta_j}$ is the odds ratio per unit of feature $j$. Second,
+logistic regression is a cousin of **[Bayes'
+rule](/math/probability/bayes-rule)** — it estimates
+$P(y = 1 \mid x)$ directly, and with an imbalanced target the learned prior
+drags probabilities toward the majority class (Day 22 returns to this).
+
+## The threshold turns probability into decision
+
+The model outputs $p$; the *decision* needs a cutoff. At 0.5 by default, every
+row lands in one of four cells — true positive, false positive, false
+negative, true negative — and each mistake has a different business cost:
+
+```python
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
+
+X_tr, X_te, y_tr, y_te = train_test_split(
+    X, y, test_size=0.2, stratify=y, random_state=0
+)
+clf = LogisticRegression(max_iter=1000).fit(X_tr, y_tr)
+proba = clf.predict_proba(X_te)[:, 1]          # scores never change
+
+for t in (0.3, 0.5, 0.7):
+    pred = (proba >= t).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_te, pred).ravel()
+    prec = tp / (tp + fp + 1e-9)
+    rec = tp / (tp + fn + 1e-9)
+    print(f"t={t:.1f}  precision={prec:.3f}  recall={rec:.3f}")
+```
+
+$$\text{precision} = \frac{TP}{TP + FP}, \qquad \text{recall} = \frac{TP}{TP + FN}, \qquad F_1 = \frac{2 \cdot \text{precision} \cdot \text{recall}}{\text{precision} + \text{recall}}$$
+
+Watch the trade-off as the threshold moves: precision and recall are enemies,
+and F1 is their harmonic truce. The right threshold comes from the cost of a
+missed positive versus a wasted alert — not from tradition.
+
+## ROC-AUC vs PR-AUC
+
+Sweep the threshold and you get two curves. **ROC** plots true-positive rate
+against false-positive rate; its area has a clean meaning — the probability
+that a random positive scores above a random negative. **PR** plots precision
+against recall and depends heavily on the base rate. With rare positives,
+ROC-AUC flatters: a 1 percent positive class makes the false-positive rate a
+denominator so large that almost anything looks good. PR-AUC shows the pain.
+Rule of thumb: balanced classes, report ROC-AUC; imbalanced, PR-AUC leads
+and ROC-AUC accompanies.
+
+<Callout kind="deep" title="AUC is threshold-free — that is its flaw too">
+  AUC of 0.83 means: draw one positive and one negative at random, and your
+  model ranks the positive higher 83 percent of the time. Because no single
+  threshold is evaluated, a beautiful AUC can coexist with a useless model —
+  if the operating point you actually deploy sits on a terrible part of the
+  curve. Always report AUC *and* the metrics at the threshold you will ship.
+</Callout>
+
+## Resources
+
+- [scikit-learn — classification metrics](https://scikit-learn.org/stable/modules/model_evaluation.html#classification-metrics)
+- [StatQuest — ROC and AUC, Clearly Explained](https://www.youtube.com/watch?v=4jRBRDbJemM)
+- [StatQuest — Logistic Regression](https://www.youtube.com/watch?v=yIYKR4sgzI8)
+
+## Exercise
+
+1. Train logistic regression on the capstone data (numeric features, median
+   imputation) and print the confusion matrix at the default threshold.
+2. Sweep thresholds from 0.1 to 0.9; tabulate precision and recall at each,
+   and identify the threshold that maximizes F1.
+3. Report ROC-AUC and PR-AUC side by side, then write one sentence on which
+   you would show a stakeholder who fears false alarms; commit.
+
+<Quiz
+  question="A fraud model at threshold 0.5 has precision 0.02 and recall 0.90. Lowering the threshold to 0.3 will most likely:"
+  options={["Increase recall, decrease precision", "Increase both", "Decrease both", "Change nothing, since the model is fixed"]}
+  answer={0}
+  explanation="A lower threshold flags more cases, so recall can only rise or hold. The newly flagged cases are mostly false positives, so precision falls. The underlying scores never move — only the cut does."
+/>

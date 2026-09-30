@@ -1,0 +1,126 @@
+---
+title: "Expectation and variance"
+summary: "Long-run averages and the spread around them: linearity of expectation, variance, covariance — and why reporting a mean without a spread is a lie of omission."
+order: 3
+---
+
+A model's expected loss, an A/B test's lift, a portfolio's return — all are
+expectations. But an expectation compresses an entire distribution into one
+number, and the compression is where careless analysis goes to die.
+
+## Expectation: the long-run average
+
+For a discrete random variable with PMF $p(x_i)$:
+
+$$\mathbb{E}[X] = \sum_{i} x_i \, p(x_i)$$
+
+and for continuous variables the sum becomes an integral over the density. The
+same recipe weights any function of the outcome:
+
+$$\mathbb{E}[g(X)] = \sum_{i} g(x_i)\, p(x_i)$$
+
+This is exactly how expected loss works: $g$ is the loss function, $p$ is the
+data distribution, and training is trying to push that weighted average down.
+
+You never know $p$ exactly — you estimate. The sample mean of $n$ draws is the
+Monte Carlo estimate of $\mathbb{E}[X]$, and the law of large numbers says it
+converges as $n$ grows. Every validation metric you have ever printed is one
+of these estimates pretending to be the real thing.
+
+## Linearity of expectation
+
+The most useful property in applied probability:
+
+$$\mathbb{E}[aX + bY] = a\,\mathbb{E}[X] + b\,\mathbb{E}[Y]$$
+
+It holds unconditionally — no independence required. Sum a thousand noisy
+estimates and the expected total is the sum of the expected parts, which is
+why ensemble averages, minibatch gradients, and Monte Carlo estimates all
+behave predictably even when their pieces are entangled.
+
+## Variance and standard deviation
+
+Expectation says where the center sits; variance says how much the mass
+spreads around it:
+
+$$\text{Var}(X) = \mathbb{E}\left[(X - \mathbb{E}[X])^2\right] = \mathbb{E}[X^2] - \mathbb{E}[X]^2$$
+
+Variance squares the units, so we usually quote the standard deviation
+$\sigma = \sqrt{\text{Var}(X)}$ instead. Unlike expectation, variance is not
+linear: $\text{Var}(aX) = a^2\,\text{Var}(X)$, and for independent variables
+the variances add. One consequence powers all of statistics: average $n$
+independent copies of $X$ and the variance of the average shrinks to
+$\sigma^2 / n$, so its standard deviation — the standard error — falls like
+$\sigma / \sqrt{n}$. That square root is why confidence intervals shrink so
+slowly as data accumulates.
+
+## Covariance and correlation
+
+Covariance extends the idea to a pair of variables:
+
+$$\text{Cov}(X, Y) = \mathbb{E}\left[(X - \mathbb{E}[X])(Y - \mathbb{E}[Y])\right]$$
+
+positive when the two rise together, negative when one rises as the other
+falls. Pearson correlation normalizes it to the range $[-1, 1]$ by dividing by
+both standard deviations. Two warnings worth keeping: correlation is blind to
+non-linear relationships (a perfect U-shape can score near zero), and
+correlation never establishes causation — confounders produce beautiful
+correlations all day long.
+
+Stack features into a random vector and all pairwise covariances arrange
+themselves into a matrix:
+
+$$\Sigma = \mathbb{E}\left[(\mathbf{X} - \boldsymbol{\mu})(\mathbf{X} - \boldsymbol{\mu})^\top\right]$$
+
+which is precisely the covariance matrix that PCA eigendecomposes in the
+linear algebra track — the two lessons are one idea seen from both sides.
+
+<Callout kind="deep" title="The mean alone deceives">
+  Dataset A always loses 10 dollars; dataset B loses nothing or 20 dollars
+  with equal chance. Identical means, wildly different risk. Model evaluation
+  has the same shape: a validation score is a sample mean, and its variance
+  across folds and seeds tells you whether that mean deserves trust at all.
+  Report spread next to every average — loss plus standard deviation, mean
+  plus confidence interval — or you are publishing half a statistic.
+</Callout>
+
+## Resources
+
+- [Khan Academy — Random variables](https://www.khanacademy.org/math/statistics-probability/random-variables-stats-library) — worked drills on mean, variance and covariance.
+- [StatQuest — Expected Values](https://statquest.org/expected-values-main-concepts/) — a friendly refresher with worked examples.
+- [MIT OCW 18.05 — Introduction to Probability and Statistics](https://ocw.mit.edu/courses/18-05-introduction-to-probability-and-statistics-spring-2022/) — lectures on expectation, variance and covariance.
+- [Seeing Theory](https://seeing-theory.brown.edu/) — play with the distributions until the intuition sticks.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  A fair six-sided die pays you the face value in dollars. Compute
+  $\mathbb{E}[X]$, $\text{Var}(X)$, and the standard deviation of the payout.
+</Callout>
+
+<Solution>
+  Each face has probability $p = 1/6$, so the expected payout is:
+
+  $$\mathbb{E}[X] = \frac{1}{6}(1 + 2 + 3 + 4 + 5 + 6) = \frac{21}{6} = 3.5$$
+
+  For the variance, use the computational form
+  $\text{Var}(X) = \mathbb{E}[X^2] - \mathbb{E}[X]^2$. First:
+
+  $$\mathbb{E}[X^2] = \frac{1}{6}(1 + 4 + 9 + 16 + 25 + 36) = \frac{91}{6} \approx 15.167$$
+
+  then subtract the squared mean:
+
+  $$\text{Var}(X) = \frac{91}{6} - (3.5)^2 = \frac{91}{6} - \frac{49}{4} = \frac{182 - 147}{12} = \frac{35}{12} \approx 2.917$$
+
+  The standard deviation is $\sqrt{35/12} \approx 1.708$ dollars. Interpretation:
+  the long-run average payout is 3.5 dollars, but a single roll typically
+  lands about 1.7 dollars away from it — which is exactly why one sample mean
+  is never the whole story.
+</Solution>
+
+<Quiz
+  question="Two models have identical average validation loss, but Model A's loss varies little across folds while Model B's swings wildly. What follows?"
+  options={["They are equally good — only means matter", "Model A is preferable: lower variance makes its mean more trustworthy", "Model B is preferable: variance means it has more potential", "Neither can be compared without a bigger dataset"]}
+  answer={1}
+  explanation="A sample mean with high variance is a less reliable estimate. Spread carries decision-relevant information that the mean alone throws away."
+/>
