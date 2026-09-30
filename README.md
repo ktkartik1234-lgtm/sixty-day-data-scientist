@@ -67,12 +67,16 @@ CLI alternative: `npx vercel` from this folder.
   ML → Deep Learning → LLMs & GenAI → Agentic AI & MLOps → Capstone). Each day:
   objectives, theory with math/code, curated resources, exercises and a quiz.
   Mark days complete; progress + streak persist in your browser.
-- **/math** — five tracks (Linear Algebra, Probability, Calculus, Statistics,
-  Optimization) with KaTeX-rendered lessons, curated resources, worked problems
-  and quizzes.
-- **/papers** — 9-paper curated library with plain-language summaries, key
+- **/math** — six tracks (Linear Algebra, Probability, Calculus, Statistics,
+  Optimization, Information Theory) with KaTeX-rendered lessons, curated
+  resources, worked problems and quizzes.
+- **/papers** — 20-paper curated library with plain-language summaries, key
   takeaways, tags, search, and back-references to roadmap days.
-- **/blog** — MDX posts with embedded math, code and interactive widgets.
+- **/glossary** — 94 terms A–Z in plain English, searchable, each linked to
+  the lessons, papers and days where the concept is used.
+- **/blog** — 16 MDX posts across foundations, ML, deep learning, GenAI,
+  MLOps and career — with math, code and interactive widgets; filterable by
+  topic.
 
 ---
 
@@ -87,6 +91,7 @@ You never touch `src/` to add content.
 | A math lesson | New `.mdx` in `content/math/<track>/` (frontmatter: `title`, `summary`, `order`) |
 | A math track | New folder `content/math/<track>/` + optional `_meta.json` (`{"name": ..., "description": ...}`) |
 | A paper | Append to `content/papers/index.json` (fields: slug, title, authors, year, venue, tags, link, summary, keyTakeaways, days) |
+| A glossary term | Append to `content/glossary.json` (term, definition, optional `see` links to math/papers/days/blog) |
 | A blog post | New `.mdx` in `content/blog/` with `title/date/description/tags` frontmatter |
 
 ### 3.1 Cross-linking (the site's core mechanism)

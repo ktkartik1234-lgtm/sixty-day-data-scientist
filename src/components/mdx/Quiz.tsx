@@ -17,7 +17,7 @@ export default function Quiz({ question, options, answer, explanation }: QuizPro
     <div className="my-6 rounded-xl border border-ink-600 bg-ink-800/60 p-4">
       <p className="font-medium text-zinc-100">{question}</p>
       <div className="mt-3 space-y-2">
-        {options.map((opt, i) => {
+        {(options || []).map((opt, i) => {
           const isAnswer = i === answer;
           const isPicked = i === picked;
           let cls = "border-ink-600 bg-ink-700/60 text-zinc-300 hover:border-accent-500/50";

@@ -125,6 +125,38 @@ if (!fs.existsSync(roadDir)) {
   if (dupes.length) fail(`duplicate day numbers: ${[...new Set(dupes)].join(", ")}`);
 }
 
+/* glossary */
+const glossaryFile = path.join(CONTENT, "glossary.json");
+if (fs.existsSync(glossaryFile)) {
+  try {
+    const terms = JSON.parse(fs.readFileSync(glossaryFile, "utf8"));
+    const seen = new Set();
+    for (const t of terms) {
+      if (!t.term) fail(`glossary entry missing "term"`);
+      if (seen.has(t.term.toLowerCase())) fail(`duplicate glossary term: ${t.term}`);
+      seen.add(t.term.toLowerCase());
+      if (!t.definition) fail(`glossary "${t.term}": missing "definition"`);
+      for (const ref of t.see?.math ?? []) {
+        if (!mathSlugs.has(ref)) fail(`glossary "${t.term}": math ref "${ref}" does not resolve`);
+      }
+      for (const ref of t.see?.papers ?? []) {
+        if (!paperSlugs.includes(ref)) fail(`glossary "${t.term}": papers ref "${ref}" not in papers/index.json`);
+      }
+      for (const ref of t.see?.blog ?? []) {
+        if (!blogSlugs.has(ref)) fail(`glossary "${t.term}": blog ref "${ref}" does not resolve`);
+      }
+      for (const ref of t.see?.days ?? []) {
+        if (!Number.isInteger(ref) || ref < 1 || ref > 60) fail(`glossary "${t.term}": day ref "${ref}" out of range`);
+      }
+    }
+    console.log(`glossary terms: ${seen.size}`);
+  } catch (e) {
+    fail(`glossary.json is not valid JSON: ${e.message}`);
+  }
+} else {
+  warn("content/glossary.json missing (glossary page will be empty)");
+}
+
 /* report */
 const rel = (p) => path.relative(ROOT, p);
 console.log(`papers: ${paperSlugs.length} · math lessons: ${mathSlugs.size} · blog posts: ${blogSlugs.size} · roadmap days: ${days.length}/60`);

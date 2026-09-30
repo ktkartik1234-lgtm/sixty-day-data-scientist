@@ -5,6 +5,7 @@ const NAV = [
   { href: "/roadmap", label: "60-Day Roadmap" },
   { href: "/math", label: "Mathematics" },
   { href: "/papers", label: "Papers" },
+  { href: "/glossary", label: "Glossary" },
   { href: "/blog", label: "Blog" },
 ];
 

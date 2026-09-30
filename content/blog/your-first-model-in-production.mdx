@@ -1,0 +1,128 @@
+---
+title: "Your first model in production: the honest checklist"
+description: "The eight steps between a working notebook and a model people actually use — and what you can safely skip for v1."
+date: "2026-10-04"
+tags: ["mlops", "career"]
+---
+
+The notebook works. The metrics look good. And yet the distance between that
+notebook and a model serving real users is where most data science projects
+die. Here's the honest version of that journey — eight steps, in order, with
+what matters at each.
+
+## Step 1: freeze an artifact
+
+Save exactly what you evaluated: one serialized pipeline (preprocessing *and*
+model together), versioned:
+
+```python
+import joblib
+joblib.dump(pipe, "models/stress-v1.3.0.joblib")
+```
+
+A pickle of a bare model, missing its scaler, is the most common deploy-day
+surprise. The [pipeline pattern](/roadmap/day/19) is your friend one last
+time.
+
+## Step 2: wrap it in a service
+
+A minimal FastAPI app, model loaded once at startup:
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+import joblib
+
+app = FastAPI()
+pipe = joblib.load("models/stress-v1.3.0.joblib")
+
+class Features(BaseModel):
+    age: int
+    income: float
+    savings_ratio: float
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.post("/predict")
+def predict(f: Features):
+    prob = float(pipe.predict_proba([[f.age, f.income, f.savings_ratio]])[0, 1])
+    return {"probability": prob}
+```
+
+Pydantic validation means malformed requests fail with a useful error
+instead of a mystery traceback ([Day 51](/roadmap/day/51) builds this
+properly).
+
+## Step 3: containerize
+
+One lean Dockerfile — pinned Python, installed deps, the model baked in
+([Day 52](/roadmap/day/52)):
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Now it runs identically on your laptop, CI, and any cloud.
+
+## Step 4: smoke tests that fail loudly
+
+Before anyone else finds the bug:
+
+```python
+def test_known_input():
+    r = client.post("/predict", json={"age": 40, "income": 50000, "savings_ratio": 0.2})
+    assert r.status_code == 200
+    assert 0.0 <= r.json()["probability"] <= 1.0
+```
+
+Run them in CI on every commit ([Day 53](/roadmap/day/53)).
+
+## Step 5: log predictions (not just errors)
+
+Store inputs, outputs, model version and timestamps from day one. This log is
+what makes drift detection, debugging and retraining possible later — retrofitting
+it after three months is painful ([Day 54](/roadmap/day/54)).
+
+## Step 6: monitor the boring things first
+
+Uptime, latency percentiles, error rate — then data drift on features. The
+model being "right" only matters if it's reachable and fast.
+
+## Step 7: write the model card
+
+Intended use, training data, metrics, known limitations, and what it must
+*not* be used for. Half a page — and the artifact that makes reviewers trust
+the deployment ([Day 59](/roadmap/day/59) has the template).
+
+## Step 8: ship behind a feature flag
+
+Route 5% of traffic, compare against the current process, expand. First
+deployments are hypotheses, not announcements.
+
+<Callout kind="tip" title="What to skip for v1">
+  Kubernetes, real-time retraining, A/B testing infrastructure, feature
+  stores. A single container behind a flag with logs and smoke tests is a
+  *real* production system. Complexity you add before users arrive is
+  complexity you maintain alone.
+</Callout>
+
+## Further reading
+
+- [The FastAPI day](/roadmap/day/51) — the full serving walkthrough.
+- [The Docker day](/roadmap/day/52) — reproducible environments.
+- [The monitoring day](/roadmap/day/54) — drift, metrics, retraining triggers.
+- [Google — MLOps: Continuous delivery](https://cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning) — the maturity model.
+
+<Quiz
+  question="What's the most important reason to log predictions from day one?"
+  options={["To debug frontend errors", "It enables drift detection, debugging and future retraining — and can't be retrofitted", "It makes the API faster", "Compliance teams require it in all cases"]}
+  answer={1}
+  explanation="Serving logs are the raw material for every later MLOps capability. Without them, you can neither detect drift nor reconstruct what the model saw when something went wrong — and the past is gone."
+/>

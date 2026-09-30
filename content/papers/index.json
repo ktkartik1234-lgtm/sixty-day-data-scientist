@@ -142,5 +142,181 @@
       "Pretraining on large data then fine-tuning transfers better than CNN pipelines."
     ],
     "days": [29, 31, 32, 42]
+  },
+  {
+    "slug": "adam",
+    "title": "Adam: A Method for Stochastic Optimization",
+    "authors": ["Diederik P. Kingma", "Jimmy Ba"],
+    "year": 2014,
+    "venue": "ICLR",
+    "tags": ["optimization", "deep-learning"],
+    "link": "https://arxiv.org/abs/1412.6980",
+    "summary": "Combines momentum with per-parameter adaptive learning rates: exponential moving averages of the gradient and of its square set each parameter's effective step size, with a bias correction so early steps aren't tiny. It trains well out of the box with minimal tuning, which is why lr=0.001 with betas (0.9, 0.999) became the field's default.",
+    "keyTakeaways": [
+      "Bias-corrected moments: m̂ = m/(1-β₁ᵗ) and v̂ = v/(1-β₂ᵗ) — without this, the first steps would be badly scaled.",
+      "Plain L2 regularization is entangled with Adam's adaptive scaling; AdamW decouples it and generalizes better.",
+      "The robust defaults rarely need changing — tune data and architecture before you tune the optimizer."
+    ],
+    "days": [26, 27]
+  },
+  {
+    "slug": "dropout",
+    "title": "Dropout: A Simple Way to Prevent Neural Networks from Overfitting",
+    "authors": ["Nitish Srivastava", "Geoffrey Hinton", "Alex Krizhevsky", "Ilya Sutskever", "Ruslan Salakhutdinov"],
+    "year": 2014,
+    "venue": "JMLR",
+    "tags": ["deep-learning", "regularization"],
+    "link": "https://www.jmlr.org/papers/v15/srivastava14a.html",
+    "summary": "Randomly zeroes each hidden unit with probability p at every training step, so no neuron can lean on specific neighbors — co-adaptations break and the network must learn redundant, robust features. At test time the full network runs with activations scaled, which effectively averages an exponential ensemble of thinned subnetworks that share weights.",
+    "keyTakeaways": [
+      "Inverted dropout divides kept activations by (1-p) during training, leaving inference code untouched.",
+      "Think of it as training exponentially many shared-weight subnetworks that vote at test time.",
+      "p=0.5 is the classic default for dense layers; transformers use far less (~0.1) — it's a dial, not a ritual."
+    ],
+    "days": [27]
+  },
+  {
+    "slug": "batch-normalization",
+    "title": "Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift",
+    "authors": ["Sergey Ioffe", "Christian Szegedy"],
+    "year": 2015,
+    "venue": "ICML",
+    "tags": ["deep-learning", "regularization", "optimization"],
+    "link": "https://arxiv.org/abs/1502.03167",
+    "summary": "Normalizes each layer's activations across the mini-batch to zero mean and unit variance, then learns a scale (γ) and shift (β) so the network can undo it where useful. Training becomes dramatically faster and more stable: higher learning rates work, initialization matters less, and the batch-to-batch noise doubles as a regularizer.",
+    "keyTakeaways": [
+      "Train and inference behave differently: batches use batch statistics, inference uses running averages — a classic deployment bug.",
+      "The learnable γ and β are essential; pure normalization would constrain the representable functions.",
+      "The original 'internal covariate shift' story is contested — loss-landscape smoothing is the better-supported explanation."
+    ],
+    "days": [27]
+  },
+  {
+    "slug": "word2vec",
+    "title": "Efficient Estimation of Word Representations in Vector Space",
+    "authors": ["Tomáš Mikolov", "Kai Chen", "Greg Corrado", "Jeffrey Dean"],
+    "year": 2013,
+    "venue": "arXiv (ICLR workshop)",
+    "tags": ["nlp", "embeddings"],
+    "link": "https://arxiv.org/abs/1301.3781",
+    "summary": "Learns dense word vectors with a tiny linear model: predict a word from its neighbors (CBOW) or the neighbors from a word (skip-gram), with negative sampling replacing the intractable softmax over the vocabulary by binary classifications against sampled words. The geometry is the payoff — king - man + woman ≈ queen.",
+    "keyTakeaways": [
+      "Skip-gram with negative sampling is a binary logistic task, not a language model — that's why it's cheap to train.",
+      "Analogies fall out of vector arithmetic: embedding geometry encodes relational semantics.",
+      "These vectors are the ancestor of the dense retrievers behind semantic search and RAG — you'll build one on Day 38."
+    ],
+    "days": [33, 37]
+  },
+  {
+    "slug": "bert",
+    "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+    "authors": ["Jacob Devlin", "Ming-Wei Chang", "Kenton Lee", "Kristina Toutanova"],
+    "year": 2018,
+    "venue": "NAACL",
+    "tags": ["nlp", "transformers", "llm"],
+    "link": "https://arxiv.org/abs/1810.04805",
+    "summary": "Pretrains a bidirectional Transformer encoder with masked language modeling — hide 15% of tokens and predict them from both directions — then fine-tunes those same weights with one small task-specific head. It ignited the pretrain-then-fine-tune era and made BERT-base the NLP baseline for years.",
+    "keyTakeaways": [
+      "Masking trick: of the 15% selected tokens, 80% become [MASK], 10% random words, 10% unchanged — blunting the pretrain/fine-tune mismatch.",
+      "Encoder (bidirectional) vs decoder (left-to-right) is the architectural fork separating BERT from GPT.",
+      "The [CLS] token's final hidden state is the pooled sentence representation for classification."
+    ],
+    "days": [32, 33]
+  },
+  {
+    "slug": "clip",
+    "title": "Learning Transferable Visual Models From Natural Language Supervision",
+    "authors": ["Alec Radford", "Jong Wook Kim", "Chris Hallacy", "et al."],
+    "year": 2021,
+    "venue": "ICML",
+    "tags": ["multimodal", "computer-vision", "embeddings"],
+    "link": "https://arxiv.org/abs/2103.00020",
+    "summary": "Trains an image encoder and a text encoder jointly on 400 million web image-caption pairs with a contrastive objective: matched pairs pull together in a shared embedding space while the other N²−N combinations in the batch push apart. At test time a classifier is built by comparing an image embedding to text embeddings of prompt-encoded class names — zero-shot, no training run.",
+    "keyTakeaways": [
+      "InfoNCE-style batch loss: maximize cosine similarity on the diagonal, minimize it everywhere else.",
+      "Zero-shot recognition is prompt engineering in embedding space — a new class costs a sentence, not a dataset.",
+      "The shared image-text space is what powers multimodal retrieval and image search today."
+    ],
+    "days": [29, 42]
+  },
+  {
+    "slug": "scaling-laws",
+    "title": "Scaling Laws for Neural Language Models",
+    "authors": ["Jared Kaplan", "Sam McCandlish", "Tom Henighan", "et al."],
+    "year": 2020,
+    "venue": "arXiv",
+    "tags": ["llm", "genai", "research"],
+    "link": "https://arxiv.org/abs/2001.08361",
+    "summary": "Fits clean power laws — loss falls as a power of model size, dataset size, and training compute across seven orders of magnitude, with architecture mattering surprisingly little. That predictability let teams forecast performance before training and turned 'scale it up' into an engineering calculation rather than a bet.",
+    "keyTakeaways": [
+      "Loss L ∝ N^−α in parameters and similar power laws in data and compute — smooth improvement, no saturation in sight.",
+      "Larger models are more sample-efficient: they reach the same loss with fewer tokens.",
+      "Its compute prescription (bigger models, modest data) was later overturned by Chinchilla — read the two together."
+    ],
+    "days": [35, 36, 41]
+  },
+  {
+    "slug": "chinchilla",
+    "title": "Training Compute-Optimal Large Language Models",
+    "authors": ["Jordan Hoffmann", "Sebastian Borgeaud", "et al."],
+    "year": 2022,
+    "venue": "NeurIPS",
+    "tags": ["llm", "genai", "research"],
+    "link": "https://arxiv.org/abs/2203.15556",
+    "summary": "Repeats the scaling-law experiment with learning rates tuned per run and reaches a different conclusion: for a fixed compute budget, parameters and training tokens should grow in step — roughly 20 tokens per parameter. A 70B model trained on 1.4T tokens (Chinchilla) beats the 280B Gopher, and the field promptly pivoted to smaller, longer-trained models.",
+    "keyTakeaways": [
+      "Rule of thumb: compute-optimal training data D ≈ 20N tokens for an N-parameter model.",
+      "Most LLMs circa 2022 were significantly undertrained on tokens for their size.",
+      "The LLaMA lineage of smaller models trained on trillions of tokens is this paper's direct legacy."
+    ],
+    "days": [39, 41]
+  },
+  {
+    "slug": "instructgpt",
+    "title": "Training language models to follow instructions with human feedback",
+    "authors": ["Long Ouyang", "Jeff Wu", "Xu Jiang", "et al."],
+    "year": 2022,
+    "venue": "NeurIPS",
+    "tags": ["llm", "rlhf", "genai"],
+    "link": "https://arxiv.org/abs/2203.02155",
+    "summary": "Turns a raw language model into an assistant in three stages: supervised fine-tuning on human-written demonstrations, a reward model trained on human preference rankings between outputs, then PPO against that reward with a KL penalty keeping the policy close to the SFT model. A 1.3B model aligned this way was preferred over 175B GPT-3 — alignment outperformed raw scale.",
+    "keyTakeaways": [
+      "The recipe: SFT → reward model from pairwise preferences → PPO with KL regularization.",
+      "Labelers preferred the aligned 1.3B model over raw GPT-3 175B — helpfulness is learnable separately from capability.",
+      "This is RLHF, the pipeline behind ChatGPT, and the fine-tuning material on Day 44 builds directly on it."
+    ],
+    "days": [36, 41, 44]
+  },
+  {
+    "slug": "chain-of-thought",
+    "title": "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models",
+    "authors": ["Jason Wei", "Xuezhi Wang", "Dale Schuurmans", "et al."],
+    "year": 2022,
+    "venue": "NeurIPS",
+    "tags": ["llm", "prompting", "genai"],
+    "link": "https://arxiv.org/abs/2201.11903",
+    "summary": "Shows that appending worked-out intermediate reasoning to few-shot exemplars — not just the answers — lets large models solve arithmetic, commonsense and symbolic problems they otherwise fail. No fine-tuning involved: the ability is latent and merely elicited, and it emerges sharply only at very large scale.",
+    "keyTakeaways": [
+      "Pure prompting: exemplars with intermediate steps, nothing trained — the capability is already in the weights.",
+      "Emergent with scale: near-zero gains for small models, step-changes for ones in the hundreds of billions.",
+      "Reasoning trades tokens and latency for accuracy — the idea that modern reasoning models industrialized."
+    ],
+    "days": [35, 36]
+  },
+  {
+    "slug": "react",
+    "title": "ReAct: Synergizing Reasoning and Acting in Language Models",
+    "authors": ["Shunyu Yao", "Jeffrey Zhao", "Dian Yu", "Nan Du", "Izhak Shafran", "Karthik Narasimhan", "Yuan Cao"],
+    "year": 2022,
+    "venue": "ICLR",
+    "tags": ["agents", "llm", "genai"],
+    "link": "https://arxiv.org/abs/2210.03629",
+    "summary": "Interleaves chain-of-thought reasoning with actions: the model writes a Thought about what to do next, emits an Action such as a tool call or search query, receives an Observation from the environment, and repeats until it can answer. Reasoning plans and reconciles, actions fetch facts the model can't be trusted to recall — the loop most agent frameworks still follow.",
+    "keyTakeaways": [
+      "The core loop is Thought → Action → Observation, repeated until Answer — a state machine you can implement in an afternoon.",
+      "Grounding each step in retrieved facts cuts hallucination relative to pure chain-of-thought.",
+      "This pattern is the blueprint for the agent you build on Days 47-49."
+    ],
+    "days": [47, 48, 49]
   }
 ]

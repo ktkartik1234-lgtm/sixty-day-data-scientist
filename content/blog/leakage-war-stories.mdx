@@ -1,0 +1,86 @@
+---
+title: "Leakage war stories: how good models go bad"
+description: "Four anonymized stories of data leakage found in real projects — and the detection heuristics each one teaches."
+date: "2026-09-29"
+tags: ["data-wrangling", "classical-ml"]
+---
+
+Nobody sets out to leak. Leakage happens because the dataset arrives looking
+innocent and the metric arrives looking wonderful — and wonderful metrics
+rarely get audited. These four stories are composites of the patterns that
+show up again and again.
+
+## Story 1: the column that was the answer
+
+A collections team built a "payment risk" model. One feature,
+`recovery_status`, correlated 0.94 with the target. It turned out
+`recovery_status` was filled in *after* the collection outcome was known —
+it was the outcome wearing a feature costume.
+
+**Heuristic:** for every feature ask *"when, in wall-clock time, did this
+value come to exist?"* If the answer is after the prediction moment, it's a
+leak. The [capstone framing day](/roadmap/day/55) makes this audit the first
+task, before any model is trained.
+
+## Story 2: group leakage across customers
+
+A churn model scored 0.94 AUC in validation and 0.62 in production.
+Investigation found multiple rows per customer scattered randomly across
+folds — the model was recognizing *customers*, not churn patterns.
+
+**Heuristic:** count distinct entities (`df["customer_id"].nunique()`) and
+compare with row count. If rows share an entity, split by entity with
+`GroupKFold`, not by row. This is the same disease as [duplicate rows across
+folds](/blog/why-your-cross-validation-is-lying) — just wearing an ID column.
+
+## Story 3: the pipeline that peeked
+
+A fraud model used target encoding for merchant IDs. The encoding table was
+computed on the full dataset before CV. Every fold's validation rows had
+their merchant's *global* fraud rate attached — a per-merchant answer key.
+
+**Heuristic:** target-derived features must be computed with out-of-fold
+logic, inside the pipeline, with smoothing. If a feature's values change
+depending on which rows are "training," it's fitting the target. The
+[feature engineering day](/roadmap/day/20) shows the safe pattern.
+
+## Story 4: the snapshot that wasn't frozen
+
+A credit model joined a "current balance" table at training time — meaning
+the balance *as of today* — for rows whose prediction moment was months
+earlier. The model learned to read the future.
+
+**Heuristic:** every join must be **as-of** the prediction moment. Time
+travel joins are the sneakiest leak because the column names are all
+perfectly reasonable. Freeze a snapshot date and join only records valid at
+that timestamp.
+
+<Callout kind="warn" title="The one invariant">
+  A leak-free pipeline has one property: deleting the labels changes nothing
+  about the *features*. If your feature matrix can't be computed from data
+  available before the target existed, no amount of regularization will save
+  the model.
+</Callout>
+
+## The 10-minute leak audit
+
+1. List every feature's origin: source table + creation time.
+2. Flag anything created at or after the outcome.
+3. Count entities vs rows; switch to grouped splits if they differ.
+4. Grep the pipeline for transforms fit outside folds.
+5. Sanity-check the metric: *this good is suspicious* — 0.99 AUC on real
+   behavioral data is a bug report, not a victory.
+
+## Further reading
+
+- [The leakage hunt](/roadmap/day/20) — the checklist version from the roadmap.
+- [The capstone EDA day](/roadmap/day/56) — running the audit on real data.
+- [Case study: Financial Stress Prediction](/blog/case-study-financial-stress) — this project's own leakage review.
+- [Google ML CRM — Data leakage](https://developers.google.com/machine-learning/crash-course/generalization/peril-of-overfitting) — a compact taxonomy.
+
+<Quiz
+  question="Which is the strongest red flag for leakage in a new dataset?"
+  options={["Many missing values in one column", "A feature whose values were recorded after the prediction moment", "A categorical feature with high cardinality", "The target is imbalanced"]}
+  answer={1}
+  explanation="Post-outcome features are the classic leak — the model reads the answer. High cardinality and imbalance are ordinary modeling challenges; a feature that exists only because the outcome happened is a broken experiment."
+/>

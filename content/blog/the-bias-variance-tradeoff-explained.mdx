@@ -1,0 +1,81 @@
+---
+title: "The bias-variance trade-off, explained like you'll actually use it"
+description: "Underfitting and overfitting are the same dial turned to different settings — how to read the train/validation gap and pick the right remedy."
+date: "2026-09-28"
+tags: ["foundations", "classical-ml"]
+---
+
+Every model fails in one of two ways, and every remedy depends on knowing
+which failure you have. Get this diagnosis right and model improvement becomes
+systematic instead of superstitious.
+
+## The two failure modes
+
+**Bias** is error from wrong assumptions: fitting a straight line to a curve.
+The model is too simple to represent the signal, so it fails the same way on
+any sample — train and test scores are both poor and close together.
+That's **underfitting**.
+
+**Variance** is error from sensitivity to your particular training sample: a
+degree-15 polynomial threading through every noisy point. The model fails
+differently on each resample — training score is excellent, validation score
+is poor. That's **overfitting**.
+
+$$\text{Expected error} = \text{Bias}^2 + \text{Variance} + \text{Irreducible noise}$$
+
+The noise term never goes away; everything you control is the split between
+the other two.
+
+## See it in one plot
+
+```python
+import numpy as np
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+
+rng = np.random.default_rng(0)
+X = rng.uniform(0, 1, (60, 1))
+y = np.sin(4 * X).ravel() + rng.normal(0, 0.15, 60)
+
+for degree in [1, 4, 15]:
+    Xp = PolynomialFeatures(degree).fit_transform(X)
+    model = LinearRegression().fit(Xp, y)
+    train_mse = mean_squared_error(y, model.predict(Xp))
+    print(f"degree {degree:2d}: train MSE {train_mse:.4f}")
+```
+
+The degree-1 model trains poorly (bias). The degree-15 model trains
+beautifully — and you already distrust it (variance). The degree-4 model is
+boring and correct.
+
+<Callout kind="tip" title="The gap is the diagnosis">
+  Don't guess from the training score alone. Read the **train/validation
+  gap**: small gap, low scores → bias problem. Large gap → variance problem.
+  The gap is the single most informative number in your training log.
+</Callout>
+
+## Match the remedy to the diagnosis
+
+| Diagnosis | Wrong move | Right moves |
+|---|---|---|
+| High bias (underfitting) | Regularize harder, add dropout | More capacity, better features, train longer, lower regularization |
+| High variance (overfitting) | Keep adding capacity | More data, stronger regularization, simpler model, ensembling |
+
+Adding data fixes variance, not bias — a million examples won't help a model
+that's structurally too simple. This is the most common mismatched remedy I
+see in code review.
+
+## Further reading
+
+- [scikit-learn — Underfitting vs. overfitting](https://scikit-learn.org/stable/auto_examples/model_selection/plot_underfitting_overfitting.html) — the canonical demo.
+- [StatQuest — Bias and Variance](https://www.youtube.com/watch?v=EuBBz3b_I-A) — the clearest 10 minutes on the topic.
+- [The cross-validation day](/roadmap/day/19) — how to measure the gap honestly.
+- [Regularization in the roadmap](/roadmap/day/27) — the variance toolbox.
+
+<Quiz
+  question="A model scores 0.99 on training data and 0.71 on validation. What's the diagnosis and the best first move?"
+  options={["High bias — use a simpler model", "High variance — add regularization or more data", "High bias — train longer", "High variance — the validation set is too small"]}
+  answer={1}
+  explanation="A large train/validation gap is the signature of overfitting (high variance). First remedies: more data, stronger regularization, or a simpler model — not more capacity."
+/>

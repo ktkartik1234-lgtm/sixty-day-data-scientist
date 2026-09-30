@@ -1,0 +1,115 @@
+---
+title: "The data cleaning playbook: a repeatable pipeline"
+description: "Types, duplicates, missingness, outliers, consistency, validation — the fixed order that turns messy tables into trustworthy ones."
+date: "2026-10-01"
+tags: ["data-wrangling", "foundations"]
+---
+
+Cleaning is not an art; it's a pipeline with a fixed order, because each step
+depends on the ones before it. You can't spot outliers before types are
+right, and you can't impute before duplicates are gone. Here's the order that
+holds up on real data.
+
+## Step 0: types first
+
+Most "dirty data" is typed data wearing the wrong dtype — numbers as strings,
+dates as objects, categories as free text. Fixing types early makes every
+later step simpler:
+
+```python
+df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+df["signup_date"] = pd.to_datetime(df["signup_date"], errors="coerce")
+df["plan"] = df["plan"].astype("category")
+```
+
+Note `errors="coerce"`: unparseable values become `NaN` so the missingness
+step can see them instead of crashing halfway through a script.
+
+## Step 1: duplicates
+
+```python
+df.duplicated().sum()                      # exact duplicates
+df.duplicated(subset="email").sum()        # duplicates on a key
+```
+
+Exact duplicates inflate every metric and — far worse — [leak across CV
+folds](/blog/why-your-cross-validation-is-lying). Key-duplicates need a rule
+(keep latest? keep highest value?) and that rule is a business question, not
+a code question.
+
+## Step 2: missingness audit before any fixing
+
+```python
+missing = df.isna().mean().sort_values(ascending=False)
+```
+
+Before imputing anything, characterize *how* values are missing — MCAR
+(random), MAR (dependent on other columns), MNAR (dependent on the missing
+value itself, e.g. income left blank by high earners). The mechanism decides
+the strategy; blind median imputation on MNAR data bakes bias into the
+dataset. [Day 12](/roadmap/day/12) covers the taxonomy.
+
+## Step 3: outliers — investigate, don't delete
+
+IQR fences and z-scores *flag*; they don't decide:
+
+```python
+q1, q3 = df["amount"].quantile([0.25, 0.75])
+iqr = q3 - q1
+suspicious = df[df["amount"] > q3 + 3 * iqr]
+```
+
+Then look at them. A $2M transaction is either a data error or your most
+interesting customer — [the outlier
+heuristic](/blog/the-data-cleaning-playbook) is investigate first, act
+second, and log what you did either way.
+
+<Callout kind="warn" title="Deleting is a decision with a paper trail">
+  Every dropped row is an assumption. Keep a `cleaning_log.md` next to the
+  notebook listing what was dropped, why, and how many rows — your future
+  self and your reviewers will both need it.
+</Callout>
+
+## Step 4: consistency
+
+The unglamorous wins: `"USA" vs "U.S.A" vs "US"`, trailing whitespace,
+case-mismatched categories, impossible values (negative ages, future
+birthdays). Standardize categories with a mapping table, trim strings, and
+assert the impossible away:
+
+```python
+assert (df["age"] >= 0).all()
+assert df["end_date"].isna().all() | (df["end_date"] > df["start_date"])
+```
+
+## Step 5: validation as a gate
+
+Turn the audit into executable checks that run at the top of every pipeline —
+greatexpectations-style, even if hand-rolled:
+
+```python
+CHECKS = {
+    "no duplicate ids": lambda d: d["id"].is_unique,
+    "amount non-negative": lambda d: (d["amount"] >= 0).all(),
+    "target present": lambda d: d["target"].notna().all(),
+}
+for name, check in CHECKS.items():
+    assert check(df), f"FAILED: {name}"
+```
+
+A pipeline that can fail loudly is the difference between a dataset and a
+liability.
+
+## Further reading
+
+- [The cleaning day](/roadmap/day/12) — the roadmap version with imputation strategies.
+- [The EDA day](/roadmap/day/13) — where cleaning meets discovery.
+- [pandas — Working with missing data](https://pandas.pydata.org/docs/user_guide/missing_data.html) — the official guide.
+- [The capstone EDA day](/roadmap/day/56) — all of this applied to a real dataset.
+
+<Quiz
+  question="Why fix dtypes before auditing missing values?"
+  options={["It makes the code run faster", "Unparseable values coerced to NaN become visible to the missingness audit instead of hiding inside wrongly-typed columns", "Because pandas requires it", "To save memory only"]}
+  answer={1}
+  explanation="With strings like 'N/A' or '-' sitting in a numeric column, isna() reports nothing — the missingness is invisible. Coercing types first turns those into real NaNs so the audit counts them."
+/>

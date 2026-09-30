@@ -1,0 +1,99 @@
+---
+title: "Backpropagation by hand: one tiny network, every number"
+description: "Forward pass, backward pass, and every intermediate value for a 2-layer network — the exercise that makes autograd stop being magic."
+date: "2026-10-02"
+tags: ["deep-learning", "foundations"]
+---
+
+You can use PyTorch productively for years without truly knowing what
+`.backward()` does. Spend one hour doing it by hand once, and autograd turns
+from magic into bookkeeping. Here's the whole computation for the smallest
+network that still counts.
+
+## The network
+
+One input $x$, one hidden neuron, one output — with sigmoid activations:
+
+$$h = \sigma(w_1 x + b_1), \qquad \hat{y} = \sigma(w_2 h + b_2)$$
+
+Use squared-error loss $L = \frac{1}{2}(\hat{y} - y)^2$ so the arithmetic
+stays clean. Values: $x = 1.0$, $y = 0$, $w_1 = 0.5$, $b_1 = 0$, $w_2 = 1.0$,
+$b_2 = 0$, and $\sigma(z) = \frac{1}{1 + e^{-z}}$ with
+$\sigma'(z) = \sigma(z)(1 - \sigma(z))$.
+
+## Forward pass — fill the table
+
+| Quantity | Expression | Value |
+|---|---|---|
+| $z_1$ | $w_1 x + b_1$ | $0.5$ |
+| $h$ | $\sigma(0.5)$ | $0.6225$ |
+| $z_2$ | $w_2 h + b_2$ | $0.6225$ |
+| $\hat{y}$ | $\sigma(0.6225)$ | $0.6510$ |
+| $L$ | $\frac{1}{2}(0.6510 - 0)^2$ | $0.2119$ |
+
+## Backward pass — the chain rule, written out
+
+Everything flows from one question: how does $L$ change if $w_2$ nudges?
+Walk the chain backwards:
+
+$$\frac{\partial L}{\partial w_2} = \underbrace{(\hat{y} - y)}_{\partial L/\partial \hat{y}} \cdot \underbrace{\sigma'(z_2)}_{\partial \hat{y}/\partial z_2} \cdot \underbrace{h}_{\partial z_2 / \partial w_2}$$
+
+Numbers: $(0.6510)(0.6510 \times 0.3490)(0.6225) \approx 0.0924$.
+
+Now $w_1$ — one more link in the chain:
+
+$$\frac{\partial L}{\partial w_1} = (\hat{y} - y)\cdot \sigma'(z_2) \cdot w_2 \cdot \sigma'(z_1) \cdot x$$
+
+Numbers: $(0.6510)(0.2272)(1.0)(0.2350)(1.0) \approx 0.0347$.
+
+Both gradients point the same direction: the model predicted 0.651 where the
+truth is 0, so increasing weights pushes the wrong way. The update rule fixes
+it:
+
+$$w \leftarrow w - \eta \frac{\partial L}{\partial w}$$
+
+<Callout kind="deep" title="What autograd actually does">
+  PyTorch recorded this exact table while you ran the forward pass — every
+  intermediate value and the operation that produced it. `.backward()` walks
+  the table in reverse, multiplying local derivatives. Your hand computation
+  and `loss.backward()` must agree to floating-point precision; when they
+  don't, that mismatch is the best debugging exercise in deep learning.
+</Callout>
+
+## The gradient check
+
+```python
+import torch
+
+x = torch.tensor(1.0)
+y = torch.tensor(0.0)
+w1 = torch.tensor(0.5, requires_grad=True)
+w2 = torch.tensor(1.0, requires_grad=True)
+
+h = torch.sigmoid(w1 * x)
+loss = 0.5 * torch.sigmoid(w2 * h) ** 2   # y = 0
+loss.backward()
+print(w1.grad, w2.grad)                    # ≈ 0.0347, 0.0924 — your numbers
+```
+
+## Why this pays off forever
+
+Backward mode computes all parameter gradients in one reverse sweep — that's
+why training 10 billion parameters costs about the same as one forward pass
+in memory-time terms. The [chain rule
+lesson](/math/calculus/chain-rule-backprop) generalizes this from two
+weights to computational graphs, and [Day 24](/roadmap/day/24) builds the
+full two-layer case.
+
+## Further reading
+
+- [Karpathy — yes you should understand backprop](https://karpathy.medium.com/yes-you-should-understand-backprop-e2f06eab496b) — the field's own opinion.
+- [CS231n — Backpropagation](https://cs231n.github.io/optimization-2/) — the modular view with branching graphs.
+- [The chain rule lesson](/math/calculus/chain-rule-backprop) — the math track's version.
+
+<Quiz
+  question="In the hand computation, why did the w₁ gradient multiply by w₂?"
+  options={["It doesn't — the two gradients are independent", "Because the loss reaches w₁ only through the hidden value h, and z₂ = w₂·h connects h to the output", "To normalize the gradient magnitude", "Because both weights share the same optimizer"]}
+  answer={1}
+  explanation="The chain rule follows the forward computation backwards: L depends on ẑ₂, which depends on h = σ(z₁), and z₂ = w₂·h — so the local derivative ∂z₂/∂h = w₂ appears in w₁'s gradient."
+/>

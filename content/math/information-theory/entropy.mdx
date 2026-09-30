@@ -1,0 +1,86 @@
+---
+title: "Entropy: measuring uncertainty"
+summary: "How much information is in an outcome? Shannon's answer is the foundation of every loss function you will ever use."
+order: "1"
+---
+
+Flip a fair coin: the outcome is maximally unpredictable. Flip a coin that
+lands heads 99% of the time: you already know the answer most of the time —
+there is little *uncertainty* to resolve. Entropy turns that intuition into a
+number.
+
+## Surprise and information
+
+Shannon defined the information (or "surprisal") of an outcome with
+probability $p$ as:
+
+$$I(x) = \log_2 \frac{1}{p(x)} = -\log_2 p(x)$$
+
+Rare events are surprising (high information); certain events are not
+(information zero). Measured in **bits** when the log base is 2: learning a
+fair coin flip is worth exactly 1 bit.
+
+## Entropy: average surprise
+
+The entropy of a distribution is the expected surprisal over its outcomes:
+
+$$H(X) = -\sum_{x} p(x) \log_2 p(x)$$
+
+Properties worth internalizing:
+
+- $H = 0$ when the outcome is certain (no uncertainty).
+- For a binary variable, $H$ is maximal at $p = 0.5$ — exactly 1 bit.
+- For $n$ equally likely outcomes, $H = \log_2 n$.
+- Entropy never negative; it depends only on the distribution, not on the
+  labels.
+
+<Callout kind="deep" title="Why decision trees care">
+  When a decision tree picks a split, it is choosing the question that
+  maximally reduces entropy — the information gain is literally the entropy
+  drop from knowing the split outcome (Day 17).
+</Callout>
+
+## In code
+
+```python
+import numpy as np
+
+def entropy(p):
+    p = np.asarray(p)
+    p = p[p > 0]                      # 0 log 0 = 0 by convention
+    return -np.sum(p * np.log2(p))
+
+entropy([0.5, 0.5])     # 1.0   — fair coin, maximum uncertainty
+entropy([0.9, 0.1])     # 0.469 — biased coin, mostly predictable
+entropy([1.0, 0.0])     # 0.0   — certain outcome
+```
+
+## Resources
+
+- [Chris Olah — Visual Information Theory](https://colah.github.io/posts/2015-09-Visual-Information/) — the best visual explanation of entropy and KL divergence.
+- [Aurélien Géron — A Short Introduction to Entropy](https://www.youtube.com/watch?v=ErfnhcEV1O8) — entropy, cross-entropy and KL in one video.
+- [MacKay — Information Theory, Inference, and Learning Algorithms](https://www.inference.org.uk/mackay/itila/) — the classic free textbook; chapters 1–2 cover everything here.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  A dataset has two classes: 90% negative, 10% positive. Compute the entropy
+  of the class distribution, and compare it with a balanced 50/50 dataset of
+  the same size.
+</Callout>
+
+<Solution>
+  $$H = -(0.9 \log_2 0.9 + 0.1 \log_2 0.1) = -(0.9 \times (-0.152) + 0.1 \times (-3.322)) \approx 0.469 \text{ bits}$$
+
+  The balanced dataset has $H = 1$ bit. The imbalanced one carries less than
+  half the uncertainty per example — which is exactly why a lazy classifier
+  that always predicts "negative" is hard to beat on accuracy (Day 22): the
+  label alone is already 0.469 bits predictable.
+</Solution>
+
+<Quiz
+  question="Which distribution has the HIGHEST entropy for a binary variable?"
+  options={["p = (0.99, 0.01)", "p = (0.9, 0.1)", "p = (0.7, 0.3)", "p = (0.5, 0.5)"]}
+  answer={3}
+  explanation="Entropy is maximal when outcomes are equally likely — the uniform distribution. The more skewed the probabilities, the more predictable the outcome and the lower the entropy."
+/>

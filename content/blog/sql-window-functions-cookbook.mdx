@@ -1,0 +1,120 @@
+---
+title: "A SQL window functions cookbook for data scientists"
+description: "Six window-function recipes that turn raw event tables into features — with the pandas equivalent for each."
+date: "2026-09-30"
+tags: ["sql", "data-wrangling"]
+---
+
+Window functions are the highest value-per-hour topic in SQL for data
+scientists. They compute aggregates *across related rows without collapsing
+them* — which is exactly the shape of most feature engineering: per customer,
+per session, per month.
+
+## The mental model
+
+A window function says: *for each row, look at a window of related rows
+(defined by `PARTITION BY` and `ORDER BY`), compute something, and attach it
+to this row.* Regular `GROUP BY` answers "one number per group"; windows
+answer "one number per row, computed from its group."
+
+```sql
+SELECT
+    customer_id,
+    order_date,
+    amount,
+    SUM(amount) OVER (PARTITION BY customer_id)                       AS lifetime_total,
+    SUM(amount) OVER (PARTITION BY customer_id
+                      ORDER BY order_date)                            AS running_total,
+    LAG(order_date) OVER (PARTITION BY customer_id
+                          ORDER BY order_date)                        AS prev_order_date
+FROM orders;
+```
+
+## Recipe 1: dedupe — keep the latest row per entity
+
+```sql
+SELECT * FROM (
+  SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY customer_id ORDER BY updated_at DESC) AS rn
+  FROM customers) t
+WHERE rn = 1;
+```
+
+Pandas: `df.sort_values('updated_at').drop_duplicates('customer_id', keep='last')`.
+
+## Recipe 2: running totals and running counts
+
+`SUM(amount) OVER (ORDER BY order_date)` — cumulative revenue for a dashboard
+or a "spend so far" feature. Pandas: `df['amount'].cumsum()` after sorting.
+
+## Recipe 3: top-N per group
+
+Latest three orders per customer, without N+1 queries:
+
+```sql
+SELECT * FROM (
+  SELECT *, ROW_NUMBER() OVER (
+      PARTITION BY customer_id ORDER BY order_date DESC) AS rn
+  FROM orders) t
+WHERE rn <= 3;
+```
+
+## Recipe 4: time-between-events
+
+`LAG`/`LEAD` fetch the previous or next row's value inside the partition.
+Days since last order:
+
+```sql
+DATEDIFF('day',
+    LAG(order_date) OVER (PARTITION BY customer_id ORDER BY order_date),
+    order_date) AS days_since_last
+```
+
+Pandas: `df.groupby('customer_id')['order_date'].diff()`.
+
+## Recipe 5: month-over-month change
+
+```sql
+SELECT month, revenue,
+  100.0 * (revenue - LAG(revenue) OVER (ORDER BY month))
+      / LAG(revenue) OVER (ORDER BY month) AS mom_pct
+FROM monthly_revenue;
+```
+
+## Recipe 6: sessionizing events
+
+A new session starts when the gap since the previous event exceeds 30
+minutes — a two-step window pattern:
+
+```sql
+WITH gaps AS (
+  SELECT *, CASE WHEN LAG(event_time) OVER (
+              PARTITION BY user_id ORDER BY event_time) IS NULL
+             OR event_time - LAG(event_time) OVER (
+              PARTITION BY user_id ORDER BY event_time) > INTERVAL '30 min'
+         THEN 1 ELSE 0 END AS new_session
+  FROM events)
+SELECT *, SUM(new_session) OVER (
+    PARTITION BY user_id ORDER BY event_time) AS session_id
+FROM gaps;
+```
+
+<Callout kind="tip" title="Where this shows up in ML">
+  Ratios of "last 7 days" to "previous 30 days", days-since-last-event, and
+  count-per-session are among the strongest tabular features you can build —
+  and every one of them is a window function before it's a feature (see the
+  [feature engineering day](/roadmap/day/20)).
+</Callout>
+
+## Further reading
+
+- [PostgreSQL — Window Functions tutorial](https://www.postgresql.org/docs/current/tutorial-window.html) — official and excellent.
+- [The SQL day](/roadmap/day/14) — joins, grouping and the pandas mental map.
+- [Mode — SQL window functions](https://mode.com/sql-tutorial/sql-window-functions/) — interactive practice.
+
+<Quiz
+  question="What does SUM(amount) OVER (PARTITION BY customer_id) do differently from GROUP BY customer_id with SUM(amount)?"
+  options={["Nothing — they are identical", "It returns one row per input row with that customer's total attached, instead of one row per customer", "It is faster because it uses an index", "It only works on numeric columns"]}
+  answer={1}
+  explanation="The window version keeps every row and annotates it with the partition-level aggregate — which is what you want when building features, since the row-level detail stays intact."
+/>

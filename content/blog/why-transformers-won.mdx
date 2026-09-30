@@ -1,0 +1,74 @@
+---
+title: "Why transformers won"
+description: "Recurrence had three structural failures. Attention fixed all three at once — and the scaling that followed made it inevitable."
+date: "2026-10-02"
+tags: ["deep-learning", "llm"]
+---
+
+By 2016, sequence modeling had a ceiling, and everyone felt it. LSTMs were
+the best tool available — and still couldn't be scaled the way the data
+demanded. The Transformer didn't beat recurrence incrementally; it removed
+the constraint that made scaling impossible.
+
+## The three failures of recurrence
+
+**1. No parallelism.** An RNN must process token 50 after token 49 — state
+flows sequentially through time. GPUs idle while waiting for a chain of small
+dependent steps. Training cost grew linearly with sequence length *in
+latency*, not just in math.
+
+**2. Long paths.** Information from token 1 reaches token 100 only by
+surviving 99 state handoffs. Gradients fought vanishing and exploding
+dynamics; LSTMs' gates mitigated but never removed the bottleneck.
+
+**3. One lossy state.** The entire history compresses into a fixed-size
+vector. Ask the model to recall an early detail after 200 tokens and you're
+asking a summary to be a transcript.
+
+## Attention: content-based lookup
+
+Attention lets every token directly address every other token. Relevance is
+computed from *content* — query against key — not from distance in a state
+chain (the [mechanics](/roadmap/day/31) are one formula):
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$$
+
+The three failures dissolve: all positions compute in **parallel** (the
+operation is a few big matrix multiplies), the path from token 1 to token 100
+is **one hop**, and nothing is compressed — every token attends to the **full
+history**.
+
+<Callout kind="deep" title="The real lesson of the Transformer paper">
+  The title is the thesis: *Attention Is All You Need*. Removing recurrence
+  wasn't a simplification of a good design — it was the removal of the thing
+  blocking scale. In ML architecture, the question "what can I delete?" is
+  often more valuable than "what can I add?"
+</Callout>
+
+## Then scale did the rest
+
+Because training is parallel matrix multiplication, transformers converted
+more GPUs directly into better models. The [scaling laws
+paper](/papers) showed loss falling predictably with parameters and data —
+a curve you could *plan against*. BERT reused the architecture bidirectionally;
+GPT made it autoregressive at scale; ViT showed images want it too. One
+architecture, every modality — that unification is why it won.
+
+The cost: attention is $O(n^2)$ in sequence length, which is why long context
+is an engineering frontier (flash attention, sliding windows, state-space
+rivals). The throne is safe for now — but the $n^2$ tax is the reason
+researchers keep trying to dethrone it.
+
+## Further reading
+
+- [The attention day](/roadmap/day/31) — queries, keys and values derived properly.
+- [The illustrated Transformer](https://jalammar.github.io/illustrated-transformer/) — Jay Alammar's visual walkthrough.
+- [Karpathy — Let's build GPT](https://www.youtube.com/watch?v=kCc8FmEb1nY) — the architecture from an empty file.
+- [Scaling laws](/papers) — the curve that turned architecture into a roadmap.
+
+<Quiz
+  question="What made transformers dramatically cheaper to train at scale than RNNs?"
+  options={["They use fewer parameters", "Attention computes all positions in parallel as matrix operations, while recurrence is sequential by construction", "They avoid using gradients", "They don't need labeled data"]}
+  answer={1}
+  explanation="Self-attention over a sequence is a small set of large matrix multiplies — exactly what GPUs are built for. RNNs' sequential state chain forced small dependent steps, leaving parallel hardware idle."
+/>

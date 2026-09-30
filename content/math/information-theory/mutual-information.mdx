@@ -1,0 +1,88 @@
+---
+title: "Mutual information: what two variables share"
+summary: "How much knowing one variable tells you about another — feature selection, representation learning and the limits of correlation."
+order: "4"
+---
+
+Correlation measures linear association between numbers. Mutual information
+measures **any** dependency between **any** variables — numeric or categorical,
+linear or wildly nonlinear. It asks: if I know $X$, how many bits of
+uncertainty about $Y$ disappear?
+
+## Definition
+
+$$I(X; Y) = H(Y) - H(Y \mid X)$$
+
+where $H(Y \mid X)$ is the conditional entropy — the uncertainty left in $Y$
+after observing $X$. Equivalent symmetric forms:
+
+$$I(X; Y) = H(X) - H(X \mid Y) = H(X) + H(Y) - H(X, Y) = D_{KL}\big( p(x,y) \,\|\, p(x)\,p(y) \big)$$
+
+The last form is the most telling: mutual information is the KL divergence
+between the joint distribution and what it would be if $X$ and $Y$ were
+independent. $I = 0$ **iff** the variables are independent. It is measured in
+bits, bounded by $\min(H(X), H(Y))$, and always non-negative.
+
+<Callout kind="deep" title="The hierarchy of dependence">
+  If $X$ and $Y$ are independent, correlation is 0 — but correlation 0 does
+  NOT imply independence. A variable $Y = X^2$ with $X$ symmetric around zero
+  has zero correlation with $X$, yet knowing $X$ determines $Y$ completely:
+  $I(X; Y) = H(Y)$, maximal. Mutual information catches what correlation
+  misses — which is why it powers feature selection for non-linear models.
+</Callout>
+
+## Where ML uses it
+
+- **Feature selection**: rank features by $I(\text{feature}; \text{target})$
+  (`sklearn.feature_selection.mutual_info_classif`) — captures nonlinear
+  signal that Pearson correlation and even per-class mean shifts miss.
+- **Decision trees**: information gain is the conditional-entropy drop, i.e.
+  exactly the mutual information between the split variable and the label
+  (Day 17).
+- **Representation learning**: the InfoNCE objective behind contrastive
+  pretraining (CLIP, Day 42) is a bound on mutual information between views;
+  VAEs trade reconstruction against a related information term.
+
+## In code
+
+```python
+from sklearn.feature_selection import mutual_info_classif
+
+# mi[i] = estimated mutual information (in nats) between feature i and target
+mi = mutual_info_classif(X, y, discrete_features=False)
+top = mi.argsort()[::-1][:10]            # 10 most informative features
+```
+
+## Resources
+
+- [Chris Olah — Visual Information Theory](https://colah.github.io/posts/2015-09-Visual-Information/) — mutual information as overlapping information content.
+- [MacKay — Information Theory, Inference, and Learning Algorithms](https://www.inference.org.uk/mackay/itila/) — chapter 8 for conditional entropy and MI.
+- [scikit-learn — mutual_info_classif docs](https://scikit-learn.org/stable/modules/generated/sklearn.feature_selection.mutual_info_classif.html) — estimation in practice.
+
+## Worked problem
+
+<Callout kind="info" title="Problem">
+  A binary target $Y$ has $P(Y{=}1) = 0.5$. A feature $X$ predicts $Y$ with
+  90% accuracy (flips the truth 10% of the time). How many bits of the
+  target's uncertainty does knowing $X$ remove?
+</Callout>
+
+<Solution>
+  $H(Y) = 1$ bit (fair target). Given $X$, the remaining uncertainty is the
+  entropy of a 90/10 guess: $H(Y \mid X) = -(0.9 \log_2 0.9 + 0.1 \log_2 0.1) \approx 0.469$ bits.
+
+  $$I(X; Y) = H(Y) - H(Y \mid X) = 1 - 0.469 = 0.531 \text{ bits}$$
+
+  A 90%-accurate feature removes barely more than half the uncertainty —
+  accuracy and information are different currencies. This is exactly why a
+  model can beat 90% accuracy only if some feature carries more than 0.531
+  bits about the target: information bounds performance before any model is
+  chosen.
+</Solution>
+
+<Quiz
+  question="Two features each have zero Pearson correlation with the target. What does mutual information theory say?"
+  options={["Both are useless and should be dropped", "They may still carry strong information — MI detects nonlinear dependence that correlation misses", "MI would also be exactly zero", "Correlation must have been computed wrongly"]}
+  answer={1}
+  explanation="Correlation only captures linear relationships. MI(X;Y) = 0 iff X and Y are truly independent, so a nonlinear dependency (e.g. a U-shaped effect) shows zero correlation but substantial mutual information."
+/>

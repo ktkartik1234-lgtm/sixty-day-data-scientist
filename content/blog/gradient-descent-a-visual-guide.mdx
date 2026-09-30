@@ -1,0 +1,95 @@
+---
+title: "Gradient descent: a visual tour of the walk downhill"
+description: "Loss landscapes, learning rates, momentum and adaptive methods — one mental picture that explains every optimizer you'll meet."
+date: "2026-10-01"
+tags: ["foundations", "deep-learning"]
+---
+
+Strip away the libraries and every training run is the same act: standing on
+a foggy hillside, feeling the slope under your feet, stepping downhill. The
+differences between optimizers are differences in *how you choose each step*.
+
+## The landscape
+
+Think of the loss as terrain: parameters are your coordinates, loss is
+altitude. The gradient $\nabla L$ points uphill; training walks the other way:
+
+$$\theta_{t+1} = \theta_t - \eta \, \nabla_\theta L(\theta_t)$$
+
+Two things decide whether you ever reach a good valley: the shape of the
+terrain and the size of your steps. The
+[gradient descent lesson](/math/optimization/gradient-descent) derives the
+update rule; here we focus on the walk.
+
+## The learning rate dial
+
+Too small: each step barely moves — training crawls and gets stuck on tiny
+ripples. Too large: each step overshoots the valley and bounces out — the
+loss oscillates or explodes. Just right: rapid early descent, then a
+smooth settle.
+
+```python
+import numpy as np
+
+def gd(L, grad, x0, lr, steps=50):
+    x = x0
+    for _ in range(steps):
+        x = x - lr * grad(x)
+    return x
+
+# a ravine: steep in one axis, shallow in the other
+L    = lambda x: 0.1 * x[0]**2 + 5 * x[1]**2
+grad = lambda x: np.array([0.2 * x[0], 10 * x[1]])
+```
+
+Run this with `lr = 0.01`, `0.1`, `0.19`, `0.21` and watch the trajectory:
+one converges, one zigzags, one diverges. The [learning rate &
+momentum lesson](/math/optimization/learning-rate-momentum) works through the
+algebra of that boundary.
+
+## Momentum: the heavy ball
+
+Plain GD zigzags in ravines because each step obeys only the local slope.
+Momentum adds inertia — an exponential moving average of past gradients:
+
+$$v_{t+1} = \beta v_t + \nabla L, \qquad \theta_{t+1} = \theta_t - \eta\, v_{t+1}$$
+
+Oscillating components cancel each other out; consistent components
+accumulate. The ball rolls through small ripples that would trap plain GD.
+
+## Adaptive methods: per-coordinate steps
+
+Adam's insight: not all parameters need the same step size. It keeps a
+running mean and variance of each gradient coordinate and rescales steps per
+coordinate — big steps where gradients are consistently small, cautious steps
+where they're noisy. It's the default because it's robust to your
+carelessness, not because it beats well-tuned SGD on every problem (it
+doesn't — see the [Adam paper](/papers)).
+
+<Callout kind="deep" title="What actually matters in practice">
+  Optimizer choice is rarely where models are won. The learning rate
+  *schedule* (warmup, then decay) and the batch size interact with
+  optimization far more than the choice between Adam and SGD. When debugging
+  training, look at the curves before the optimizer: divergence is a schedule
+  problem twice as often as it is an optimizer problem.
+</Callout>
+
+## A compact debugging ritual
+
+1. Overfit 10 examples first — if you can't, it's a bug, not a schedule.
+2. Plot loss per step, not per epoch — oscillation hides in averages.
+3. Try `lr × 0.1` and `lr × 10` before changing anything else.
+4. Only then reach for a fancier optimizer.
+
+## Further reading
+
+- [3Blue1Brown — Gradient descent](https://www.3blue1brown.com/topics/neural-networks) — chapter 4 of the neural network series.
+- [The roadmap's optimizer day](/roadmap/day/26) — SGD, momentum and Adam in PyTorch.
+- [An overview of gradient descent algorithms](https://ruder.io/optimizing-gradient-descent/) — Sebastian Ruder's classic survey.
+
+<Quiz
+  question="Training loss oscillates wildly between high values instead of decreasing. Most likely cause?"
+  options={["Batch size too small", "Learning rate too large — steps overshoot the valley", "The model has too little capacity", "Momentum is set too low"]}
+  answer={1}
+  explanation="Oscillating or diverging loss is the classic signature of overshooting: each step jumps across the valley. Drop the learning rate (or add warmup) before touching anything else."
+/>

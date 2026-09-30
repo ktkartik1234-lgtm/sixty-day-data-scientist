@@ -1,0 +1,94 @@
+---
+title: "Why your cross-validation is lying to you"
+description: "K-fold is only honest if nothing about the validation fold leaks into training. The four leaks that cause almost all fake CV scores."
+date: "2026-09-29"
+tags: ["classical-ml", "data-wrangling"]
+---
+
+Cross-validation is the honesty machine of machine learning — and it is
+surprisingly easy to break without noticing. A broken pipeline doesn't crash;
+it just produces confident, beautiful, wrong numbers.
+
+## Leak 1: preprocessing before the split
+
+The classic:
+
+```python
+# WRONG — the scaler has seen the validation folds
+scaler = StandardScaler().fit(X)
+X_scaled = scaler.transform(X)
+score = cross_val_score(model, X_scaled, y).mean()
+```
+
+Fitting the scaler on all of `X` bakes validation-fold statistics into the
+training data. With aggressive transforms (target encoding, imputation from
+medians, feature selection) this inflates scores substantially. The fix is
+structural, not carefulness:
+
+```python
+# RIGHT — transforms fit inside each fold
+from sklearn.pipeline import make_pipeline
+pipe = make_pipeline(StandardScaler(), model)
+score = cross_val_score(pipe, X, y).mean()
+```
+
+A `Pipeline` refits every transform on each fold's training portion. This is
+why [Day 19](/roadmap/day/19) treats the pipeline as mandatory, not optional.
+
+## Leak 2: duplicated or grouped rows
+
+If the same customer appears in three rows and CV scatters them across folds,
+the model effectively trains on the test answer. Any data with natural groups
+— users, patients, devices, transactions from the same account — needs
+**group-aware splitting**:
+
+```python
+from sklearn.model_selection import GroupKFold
+scores = cross_val_score(pipe, X, y, groups=customer_id, cv=GroupKFold(5))
+```
+
+Deduplicate first (`df.duplicated().sum()` — see [the cleaning
+playbook](/blog/the-data-cleaning-playbook)), then split by group.
+
+## Leak 3: time treated as iid
+
+Forecasting next month's churn while validating on random folds means
+training on the future to predict the past. Temporal data demands
+**forward-chaining splits**: train on months 1–6, validate on 7; train on
+1–7, validate on 8. Every fold must point only backwards.
+
+<Callout kind="warn" title="Random splits on time series are not pessimism — they're a different question">
+  Random CV answers "how well does this model fit this period?" Forward
+  chaining answers "how well will it predict tomorrow?" Only the second
+  question is the one your users are asking.
+</Callout>
+
+## Leak 4: target-informed features
+
+Target encoding computed on the full dataset, features derived from
+post-outcome fields, aggregates that include the validation rows — all of
+these teach the model the answer. The audit question for every feature:
+**"Is this value knowable at prediction time, computed only from rows that
+would be available then?"** The [leakage war stories](/blog/leakage-war-stories)
+are all variations of this one question.
+
+## The checklist
+
+1. Every transform lives inside a `Pipeline`.
+2. Groups (users, accounts) never span folds.
+3. Time series use forward-chaining splits.
+4. Every feature passes the "knowable at prediction time" test.
+5. The metric you report is computed on data the model has never influenced.
+
+## Further reading
+
+- [scikit-learn — Common pitfalls](https://scikit-learn.org/stable/common_pitfalls.html) — the official leakage guide.
+- [The cross-validation day](/roadmap/day/19) — pipelines, stratification, repeated CV.
+- [Feature engineering and the leakage hunt](/roadmap/day/20) — the checklist version.
+
+<Quiz
+  question="Your 5-fold CV accuracy is 96%, but the model scores 71% in production. Most likely cause?"
+  options={["The model overfit during training epochs", "Information leaked across folds — most likely preprocessing fit outside the pipeline or non-grouped splits", "Accuracy is the wrong metric", "The test set is too small"]}
+  answer={1}
+  explanation="A large CV-vs-production gap with a clean holdout usually means CV itself was optimistic: transforms fit on all data, duplicated rows spanning folds, or temporal leakage. Fix the splitting structure, not the model."
+/>

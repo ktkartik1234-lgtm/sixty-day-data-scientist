@@ -1,0 +1,76 @@
+---
+title: "RAG vs fine-tuning: the decision I wish someone had handed me"
+description: "Knowledge vs behavior, cost vs latency, freshness vs stability — the framework for choosing, and when you need both."
+date: "2026-10-03"
+tags: ["llm", "genai", "mlops"]
+---
+
+Every team adopting LLMs hits the same fork: the model doesn't know our
+stuff, or doesn't behave the way we need. The two fixes — RAG and
+fine-tuning — are **for different problems**, and choosing wrong costs
+months.
+
+## The one-question test
+
+- *Does the model need to **know** something it was never told?* → **RAG**.
+  Facts, documents, prices, policies, anything that changes.
+- *Does the model need to **behave** differently — style, format, domain
+  patterns it clearly understands but doesn't produce?* → **fine-tuning**.
+
+RAG changes what's in the prompt. Fine-tuning changes the weights. Nothing
+else in the comparison matters as much as that distinction.
+
+## The comparison that actually decides it
+
+| Axis | RAG | Fine-tuning |
+|---|---|---|
+| What changes | Context at inference | Model weights |
+| Knowledge freshness | Update the index, done | Retrain to update |
+| Upfront cost | Low (embedding + index) | High (data + training) |
+| Per-query cost | Higher (longer prompts, retrieval) | Lower (short prompts) |
+| Latency | Retrieval adds tens–hundreds of ms | Same as base model |
+| Attribution | Citations to retrieved sources | Baked in, not attributable |
+| Failure mode | Retrieval misses → wrong or hedged answer | Learns the *format* of your data too well, stale weights |
+
+<Callout kind="warn" title="Fine-tuning is not a knowledge injection tool">
+  Teams fine-tune on documents hoping the model memorizes them. It sort of
+  does — unreliably, unattributably, and it goes stale the day the documents
+  change. Facts belong in a retrieval index. Fine-tune when you want
+  *behavior* (tone, schema adherence, domain phrasing), not *knowledge*.
+</Callout>
+
+## The escalation ladder
+
+Start at the bottom; only climb when the current rung measurably fails:
+
+1. **Good prompt, zero-shot** — base model, clear instructions.
+2. **Few-shot** — 3–5 exemplars in the prompt ([Day 35](/roadmap/day/35)).
+3. **RAG** — the model needs your knowledge ([Day 38](/roadmap/day/38)).
+4. **Fine-tune (LoRA)** — the model needs your *behavior* ([Day 40](/roadmap/day/40)).
+5. **RAG + fine-tuned base** — knowledge and behavior, combined.
+
+Most teams that "need fine-tuning" are stuck on rung 2. Most teams stuck on
+rung 2 have a retrieval problem they haven't diagnosed yet.
+
+## Evaluating each path
+
+- **RAG**: build a 50–100 question eval set with known source documents;
+  measure hits@k for retrieval and grounded-answer accuracy for generation.
+  The [RAG checkpoint day](/roadmap/day/45) is a full worked example.
+- **Fine-tuning**: hold out a test set in the *task* format; measure
+  instruction-following or output-schema adherence against the base model.
+  If the delta is small, the fine-tune isn't worth its maintenance cost.
+
+## Further reading
+
+- [The RAG paper](/papers) — the original retrieval-augmented architecture.
+- [The LoRA paper](/papers) — why fine-tuning became affordable.
+- [RAG in practice](/roadmap/day/38) — chunking, reranking, citations.
+- [Prompting vs fine-tuning day](/roadmap/day/39) — the roadmap's version of this decision.
+
+<Quiz
+  question="A support bot must answer questions from a policy handbook that updates weekly. Best architecture?"
+  options={["Fine-tune weekly on the handbook", "RAG over the handbook, re-indexed when it updates", "Paste the whole handbook into every prompt, no retrieval", "Train a small classifier over policy numbers"]}
+  answer={1}
+  explanation="Fresh, changing knowledge is the textbook RAG case: the index re-ingests the new handbook and answers stay current and citable — no weekly retraining pipeline, no staleness risk."
+/>

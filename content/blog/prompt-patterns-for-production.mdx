@@ -1,0 +1,103 @@
+---
+title: "Prompt patterns that survive production traffic"
+description: "The difference between a prompt that demos well and one that runs for a year: structure, hard negatives, self-checks and versioning."
+date: "2026-10-03"
+tags: ["llm", "genai", "mlops"]
+---
+
+A demo prompt works because you're the one typing the input. Production
+prompts face real users, malformed data, adversarial phrasing and drift. The
+patterns below are what separates the two — most were learned by watching
+prompts fail at scale.
+
+## Pattern 1: structure the output, then validate it
+
+Free text is a bug factory. Decide the schema first and instruct for it:
+
+```
+Return JSON with exactly these keys:
+{"label": one of ["billing", "technical", "account"],
+ "confidence": a number between 0 and 1,
+ "evidence": the shortest quote from the ticket that supports the label}
+```
+
+Then validate outside the model — parse, check enum membership, retry once
+on failure with the parse error appended. The model is a component in a
+pipeline, and pipelines need typed interfaces ([Day 36](/roadmap/day/36)
+covers the wrapper pattern).
+
+## Pattern 2: few-shot with hard negatives
+
+Generic examples teach the format. **Hard negatives** teach the boundaries —
+pairs the model historically confuses:
+
+```
+Ticket: "I was charged twice AND the app crashes" → {"label": "billing", ...}
+Ticket: "The payment screen crashes" → {"label": "technical", ...}
+```
+
+The first ticket contains *both* signals; the label you choose for it encodes
+your precedence rule. That single example often outperforms ten clean ones.
+
+## Pattern 3: grounding with delimiters
+
+Separate instructions from data with explicit markers, and instruct the model
+to answer only from within them:
+
+```
+Answer using ONLY the text inside <context> tags.
+<context>{{retrieved_documents}}</context>
+If the answer is not in the context, say "Not found in the provided documents."
+```
+
+This is the seed of [RAG](/blog/rag-vs-fine-tuning) and the first line of
+defense against the model filling gaps with plausible invention — the
+failure mode behind most [hallucinations](/papers).
+
+## Pattern 4: self-check passes
+
+For high-stakes outputs, add a verification pass — either the same model or a
+cheaper one:
+
+```
+Before returning, verify: does the JSON parse? Is the label in the allowed
+set? Is the evidence quote actually present in the context? If any check
+fails, fix it before answering.
+```
+
+This is chain-of-thought applied to quality control — the
+[chain-of-thought paper](/papers) formalized the reasoning benefit; the
+production version applies it to validation.
+
+<Callout kind="warn" title="Prompt injection is a correctness bug, not a security nicety">
+  If user text flows into your prompt, a user can write instructions in it:
+  "ignore previous directions and…". Mitigate with delimiters, instruction
+  hierarchy, and treating model output as untrusted input to the next system
+  — never as trusted commands ([Day 44](/roadmap/day/44) has the full
+  treatment).
+</Callout>
+
+## Pattern 5: version prompts like code
+
+A prompt is a deployed artifact: it changes behavior, so it needs change
+control.
+
+1. **Version it** — `prompts/classify@v3`, in the repo, reviewed via PR.
+2. **Eval before deploy** — a fixed set of ~50 real cases; a prompt change
+   ships only if the eval doesn't regress ([Day 41](/roadmap/day/41)).
+3. **Log the version** with every response — when quality shifts at 2am,
+   "which prompt was live?" is the first question you'll ask.
+
+## Further reading
+
+- [The prompt engineering day](/roadmap/day/35) — the foundational patterns.
+- [The GPT-3 paper](/papers) — where few-shot prompting was formalized.
+- [OpenAI — Prompt engineering guide](https://platform.openai.com/docs/guides/prompt-engineering) — official strategies.
+- [The LLM evaluation day](/roadmap/day/41) — benchmarks and LLM-as-judge.
+
+<Quiz
+  question="Your classification prompt works in testing but breaks when users paste text containing 'ignore all instructions'. Which fix set is right?"
+  options={["Raise the temperature so the model is more robust", "Delimiter the user text, instruct answers-only-from-context, and treat model output as untrusted downstream", "Add more examples of correct labels", "Switch to a bigger model"]}
+  answer={1}
+  explanation="That input is prompt injection. The mitigations are structural: clear separation between instructions and data, grounding instructions, and downstream validation — not sampling parameters or model size."
+/>

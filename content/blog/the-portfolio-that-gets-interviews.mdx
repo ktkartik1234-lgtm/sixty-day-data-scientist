@@ -1,0 +1,88 @@
+---
+title: "The portfolio that gets interviews"
+description: "What actually happens in the 90 seconds a reviewer spends on your GitHub — and how to build for it."
+date: "2026-10-05"
+tags: ["career", "portfolio"]
+---
+
+Hiring managers don't read your portfolio. They *skim* it — three to five
+projects, ninety seconds, decision made. Everything about building a portfolio
+follows from respecting that reality.
+
+## What a reviewer actually checks
+
+In order:
+
+1. **Is there a README that says what this is in the first screen?** Problem,
+   approach, result — before any code.
+2. **Is there a number?** "Reduced false positives 23% vs baseline" beats
+   every adjective ever written. No metric, no story.
+3. **Does it run?** A repo with requirements and one command that works beats
+   a repo with brilliant code and broken setup instructions.
+4. **Is there a decision documented?** The interesting part of data science
+   is judgment calls — metric choice, leakage found, trade-off made. Show one.
+
+## The project that matters most
+
+One deep, end-to-end project outweighs five tutorial retreads. That's why the
+[60-day capstone](/blog/case-study-financial-stress) is built to be public:
+real dataset, documented [leakage audit](/roadmap/day/56), baseline ladder
+([Day 57](/roadmap/day/57)), honest [evaluation with
+calibration](/roadmap/day/58), a [model card](/roadmap/day/59) and a deployed
+demo. The depth signals seniority; tutorial projects signal the opposite.
+
+**The anti-portfolio:** Titanic, house prices, MNIST. Reviewers have seen
+each of these hundreds of times. If you must learn with them, don't lead with
+them.
+
+## The write-up anatomy
+
+Every project README needs five sections, roughly one screen each:
+
+1. **Problem** — the decision this model informs, in plain language.
+2. **Approach** — data, features, models tried, and *why*.
+3. **Results** — the honest table: baselines included, validation scheme
+   stated, one headline number.
+4. **Limitations** — what would break it, what you'd do next. This section
+   builds more trust than the results do.
+5. **Reproduce** — exact commands, from clone to prediction.
+
+## Signals that cost nothing
+
+- **A deployed demo** — a link someone can click. Hugging Face Spaces or a
+  FastAPI container on a free tier; the [deployment
+  day](/roadmap/day/59) gets you there.
+- **Clean git history** — meaningful commits show how you think.
+- **Tests and a pipeline** — even a few smoke tests mark you as someone
+  who ships.
+- **A write-up elsewhere** — a blog post (like this site's) that walks
+  through the project's reasoning. Recruiters click blog links; they rarely
+  read notebooks.
+
+<Callout kind="tip" title="The one-sentence test">
+  For each project, write one sentence a non-technical recruiter would
+  understand and be curious about: *"Predicts household financial stress from
+  survey data — found and removed two leaky features that inflated early
+  results by 11 points."* If you can't write it, the project isn't done.
+</Callout>
+
+## The 60-day connection
+
+If you've followed the [roadmap](/roadmap), you already have the pieces: the
+[checkpoint days](/roadmap/day/10) produced small artifacts, the capstone
+produced the flagship, and the [blog](/blog) holds the write-ups. Assemble
+them into a GitHub profile README with the three best projects, linked, each
+passing the one-sentence test — that's the whole portfolio.
+
+## Further reading
+
+- [The capstone kickoff](/roadmap/day/55) — framing a portfolio-grade project.
+- [The portfolio day](/roadmap/day/60) — the full checklist from the roadmap.
+- [The write-up day](/roadmap/day/60) — turning the capstone into narrative.
+
+<Quiz
+  question="Which single addition most improves a finished portfolio project?"
+  options={["Replacing scikit-learn with a deep learning model", "A deployed demo link plus a results table that includes baselines", "Adding five more pages of EDA plots", "Rewriting the README in more technical language"]}
+  answer={1}
+  explanation="Reviewers want evidence it works and honesty about how well. A clickable demo plus a baseline-inclusive results table communicates both in seconds — far more than extra complexity or volume."
+/>

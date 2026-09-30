@@ -233,6 +233,28 @@ export function getMathLesson(
   };
 }
 
+/* --------------------------------- glossary ------------------------------- */
+
+export type GlossaryTerm = {
+  term: string;
+  definition: string;
+  see?: {
+    math?: string[];
+    papers?: string[];
+    days?: number[];
+    blog?: string[];
+  };
+};
+
+export function getGlossaryTerms(): GlossaryTerm[] {
+  const file = path.join(CONTENT_DIR, "glossary.json");
+  if (!fs.existsSync(file)) return [];
+  const terms = readJson<GlossaryTerm[]>(file);
+  return [...terms].sort((a, b) =>
+    a.term.toLowerCase().localeCompare(b.term.toLowerCase())
+  );
+}
+
 /* ---------------------------------- papers -------------------------------- */
 
 export function getPapers(): Paper[] {
