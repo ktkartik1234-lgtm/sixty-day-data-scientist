@@ -15,8 +15,10 @@ Write $(f \circ g)(x) = f(g(x))$: first apply $g$, then apply $f$ to the
 result. Logistic regression is already a composition — linear map, then
 sigmoid, then loss:
 
-$$J = \underbrace{L}_{\text{loss}}\Big(\underbrace{\sigma}_{\text{sigmoid}}
-\big(\underbrace{w^\top x + b}_{\text{linear}}\big)\Big)$$
+$$
+J = \underbrace{L}_{\text{loss}}\Big(\underbrace{\sigma}_{\text{sigmoid}}
+\big(\underbrace{w^\top x + b}_{\text{linear}}\big)\Big)
+$$
 
 A deep network just keeps nesting:
 $J = L\big(a_L(a_{L-1}(\cdots a_1(x)\cdots))\big)$. If we could not
@@ -27,13 +29,17 @@ rule is not an optional topic; it is the price of admission.
 
 If $u = g(x)$ and $y = f(u)$, then
 
-$$\frac{dy}{dx} = \frac{dy}{du} \cdot \frac{du}{dx}$$
+$$
+\frac{dy}{dx} = \frac{dy}{du} \cdot \frac{du}{dx}
+$$
 
 In words: *local derivatives multiply along the path from input to output.*
 For three composed stages $x \to z \to a \to J$:
 
-$$\frac{\partial J}{\partial x} = \frac{\partial J}{\partial a} \cdot
-\frac{\partial a}{\partial z} \cdot \frac{\partial z}{\partial x}$$
+$$
+\frac{\partial J}{\partial x} = \frac{\partial J}{\partial a} \cdot
+\frac{\partial a}{\partial z} \cdot \frac{\partial z}{\partial x}
+$$
 
 Each factor is the derivative of a *simple* function evaluated at a *known
 point*. That is the whole trick: complicated derivative in, a product of
@@ -75,7 +81,9 @@ Backward, one local derivative at a time:
 $\partial J / \partial z = 2z = 12$ and $\partial z / \partial w = x = 2$.
 Multiply along the path:
 
-$$\frac{\partial J}{\partial w} = 12 \times 2 = 24$$
+$$
+\frac{\partial J}{\partial w} = 12 \times 2 = 24
+$$
 
 Sanity check by collapsing the graph: $J(w) = (2w)^2 = 4w^2$, so
 $dJ/dw = 8w = 24$ at $w = 3$. The graph and the closed form agree — as they
@@ -110,13 +118,17 @@ must, since they are the same theorem worn two ways.
 
   Backward, one local derivative per edge:
 
-  $$\frac{\partial J}{\partial a} = 2(a - y) = 32, \qquad
+  $$
+\frac{\partial J}{\partial a} = 2(a - y) = 32, \qquad
     \frac{\partial a}{\partial z} = 2z = 8, \qquad
-    \frac{\partial z}{\partial w} = x = 2$$
+    \frac{\partial z}{\partial w} = x = 2
+  $$
 
   Multiply along the path from $w$ to $J$:
 
-  $$\frac{\partial J}{\partial w} = 32 \times 8 \times 2 = 512$$
+  $$
+\frac{\partial J}{\partial w} = 32 \times 8 \times 2 = 512
+  $$
 
   Check by eliminating the intermediates: $z = 2w$, so
   $J = \big((2w)^2\big)^2 = 16w^4$ and $dJ/dw = 64w^3 = 64 \times 8 = 512$

@@ -14,12 +14,16 @@ the gradient that drives every optimizer you will ever run.
 For a function $f(x)$, the derivative at $x$ is the limit of average slopes
 over shrinking windows:
 
-$$f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}$$
+$$
+f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}
+$$
 
 Geometrically that is the slope of the tangent line, but the reading that
 matters in ML is sensitivity. Rearranged, it is the first-order prediction:
 
-$$f(x + h) \approx f(x) + f'(x)\,h$$
+$$
+f(x + h) \approx f(x) + f'(x)\,h
+$$
 
 If the derivative at $x$ is $-2$, a tiny push of $+0.01$ on the input drops
 the output by about $0.02$. A derivative of zero means the output is flat to
@@ -30,11 +34,17 @@ first order — you are standing at a candidate minimum or maximum.
 Almost every loss and activation is assembled from powers, products and
 compositions, so three rules cover most of what you will ever differentiate:
 
-$$\frac{d}{dx}x^n = n\,x^{n-1} \qquad \text{(power rule)}$$
+$$
+\frac{d}{dx}x^n = n\,x^{n-1} \qquad \text{(power rule)}
+$$
 
-$$(f \cdot g)' = f'g + fg' \qquad \text{(product rule)}$$
+$$
+(f \cdot g)' = f'g + fg' \qquad \text{(product rule)}
+$$
 
-$$(f \circ g)' = f'\big(g(x)\big)\cdot g'(x) \qquad \text{(chain rule)}$$
+$$
+(f \circ g)' = f'\big(g(x)\big)\cdot g'(x) \qquad \text{(chain rule)}
+$$
 
 Quick sample: for $f(x) = x^2 \sin(x)$ the product rule gives
 $f'(x) = 2x\sin(x) + x^2\cos(x)$. The chain rule is the deepest of the three —
@@ -48,11 +58,13 @@ function of many inputs, we differentiate with respect to each input while
 holding the rest fixed — a *partial derivative* — and stack the results into
 the **gradient**:
 
-$$\nabla f = \begin{bmatrix}
+$$
+\nabla f = \begin{bmatrix}
 \frac{\partial f}{\partial x_1} \\[2pt]
 \vdots \\[2pt]
 \frac{\partial f}{\partial x_d}
-\end{bmatrix}$$
+\end{bmatrix}
+$$
 
 The gradient is a vector, so it has both magnitude and direction — and the
 direction is special: $\nabla f$ points where $f$ increases fastest. Turn it
@@ -67,7 +79,9 @@ gradient as one sensitivity number per parameter, collected into a vector.
 Hand-derived gradients are where bugs live. The cheap, universal check is the
 **central difference** approximation:
 
-$$f'(x) \approx \frac{f(x+h) - f(x-h)}{2h}$$
+$$
+f'(x) \approx \frac{f(x+h) - f(x-h)}{2h}
+$$
 
 It is accurate to order $h^2$: with $h = 10^{-5}$ you get roughly eight
 correct digits, far more than needed to expose a wrong formula. In NumPy:
@@ -123,7 +137,9 @@ derivative is wrong — not the numerics.
   (c) $f'(2) = 3(4) - 3 = 9$. Numerically, $f(2.01) = 2.090601$ and
   $f(1.99) = 1.910599$, so
 
-  $$\frac{f(2.01) - f(1.99)}{0.02} = \frac{0.180002}{0.02} = 9.0001$$
+  $$
+\frac{f(2.01) - f(1.99)}{0.02} = \frac{0.180002}{0.02} = 9.0001
+  $$
 
   The central difference lands within $10^{-4}$ of the analytic answer — the
   residual is the expected order-$h^2$ truncation error, not a bug.

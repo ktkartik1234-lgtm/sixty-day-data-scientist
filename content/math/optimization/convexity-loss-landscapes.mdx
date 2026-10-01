@@ -15,8 +15,10 @@ A set is convex if the line segment between any two of its points stays
 inside the set. A function is convex if the same idea holds for its graph —
 the chord between any two points lies on or above the curve:
 
-$$f\big(\lambda x + (1-\lambda)\,y\big) \;\le\;
-\lambda f(x) + (1-\lambda) f(y) \qquad \text{for all } \lambda \in [0, 1]$$
+$$
+f\big(\lambda x + (1-\lambda)\,y\big) \;\le\;
+\lambda f(x) + (1-\lambda) f(y) \qquad \text{for all } \lambda \in [0, 1]
+$$
 
 Blend two inputs, and the loss at the blend is no worse than the blended
 losses. Quadratics like $x^2$, the absolute value and $e^x$ are convex;
@@ -40,7 +42,9 @@ Convexity collapses the optimization story into three clean statements:
 
 Linear regression with squared error is convex in the weights:
 
-$$J(w) = \lVert Xw - y \rVert^2$$
+$$
+J(w) = \lVert Xw - y \rVert^2
+$$
 
 an affine map composed with a squared norm — one bowl, which is why it even
 admits a closed-form solution, the normal equation
@@ -106,8 +110,10 @@ a basin that generalizes.
   Both gradients vanish at the origin, so both are critical points. The
   Hessians (the matrix of second partials) are constant here:
 
-  $$H_A = \begin{bmatrix} 2 & 0 \\ 0 & 20 \end{bmatrix}, \qquad
-    H_B = \begin{bmatrix} 2 & 0 \\ 0 & -2 \end{bmatrix}$$
+  $$
+H_A = \begin{bmatrix} 2 & 0 \\ 0 & 20 \end{bmatrix}, \qquad
+    H_B = \begin{bmatrix} 2 & 0 \\ 0 & -2 \end{bmatrix}
+  $$
 
   $H_A$ has eigenvalues $2$ and $20$ — both positive, so the origin is a
   minimum. Since the eigenvalues are positive *everywhere*, $J_A$ is strictly

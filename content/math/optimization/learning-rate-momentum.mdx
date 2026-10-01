@@ -14,13 +14,17 @@ upgrade path, stacked in the order practitioners actually add them.
 Two workhorse schedules. **Step decay** cuts the rate by a factor $\gamma$
 every $k$ epochs:
 
-$$\eta_t = \eta_0 \cdot \gamma^{\lfloor t / k \rfloor}$$
+$$
+\eta_t = \eta_0 \cdot \gamma^{\lfloor t / k \rfloor}
+$$
 
 **Cosine annealing** glides the rate from $\eta_{\max}$ down to
 $\eta_{\min}$ over a horizon of $T$ steps:
 
-$$\eta_t = \eta_{\min} + \tfrac{1}{2}\,(\eta_{\max} - \eta_{\min})
-\left(1 + \cos\!\Big(\frac{\pi t}{T}\Big)\right)$$
+$$
+\eta_t = \eta_{\min} + \tfrac{1}{2}\,(\eta_{\max} - \eta_{\min})
+\left(1 + \cos\!\Big(\frac{\pi t}{T}\Big)\right)
+$$
 
 Both encode the same idea: explore widely early, settle precisely late.
 Transformers add a short **warmup** — start near zero and ramp up — so the
@@ -31,8 +35,10 @@ optimizer does not take wild steps before gradient statistics stabilize.
 Momentum gives the iterate inertia — an exponentially weighted average of
 recent steps:
 
-$$v_{t+1} = \beta\, v_t - \eta\, \nabla J(\theta_t), \qquad
-\theta_{t+1} = \theta_t + v_{t+1}$$
+$$
+v_{t+1} = \beta\, v_t - \eta\, \nabla J(\theta_t), \qquad
+\theta_{t+1} = \theta_t + v_{t+1}
+$$
 
 Gradients that point the same way every step accumulate in $v$; gradients
 that flip sign every step cancel out. The arithmetic payoff: at steady state
@@ -46,8 +52,10 @@ Plain descent forces one $\eta$ onto parameters with wildly different
 gradient scales. RMSProp keeps a running average $s$ of squared gradients
 and divides by it:
 
-$$s_{t+1} = \alpha\, s_t + (1-\alpha)\, g_t^2, \qquad
-\theta_{t+1} = \theta_t - \eta\, \frac{g_t}{\sqrt{s_{t+1}} + \epsilon}$$
+$$
+s_{t+1} = \alpha\, s_t + (1-\alpha)\, g_t^2, \qquad
+\theta_{t+1} = \theta_t - \eta\, \frac{g_t}{\sqrt{s_{t+1}} + \epsilon}
+$$
 
 with $g_t = \nabla J(\theta_t)$. Parameters with chronically large gradients
 get their steps shrunk; quiet parameters keep moving. Every coordinate now
@@ -58,9 +66,11 @@ travels at a comparable speed, which tames badly scaled problems for free.
 Adam keeps both running averages — $m$ of the gradients, $v$ of their
 squares — and bias-corrects both for the cold start when $t$ is small:
 
-$$\hat{m}_t = \frac{m_t}{1 - \beta_1^t}, \qquad
+$$
+\hat{m}_t = \frac{m_t}{1 - \beta_1^t}, \qquad
 \hat{v}_t = \frac{v_t}{1 - \beta_2^t}, \qquad
-\theta_{t+1} = \theta_t - \eta\, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}$$
+\theta_{t+1} = \theta_t - \eta\, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
+$$
 
 with defaults $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$. Adam
 is the sensible first optimizer: it absorbs momentum's direction sense and
@@ -129,7 +139,9 @@ is the heavy-ball picture in one sentence.
   in step one carries into step two. In steady state the effective rate
   approaches
 
-  $$\eta_{\text{eff}} = \frac{\eta}{1 - \beta} = \frac{0.1}{0.1} = 1.0$$
+  $$
+\eta_{\text{eff}} = \frac{\eta}{1 - \beta} = \frac{0.1}{0.1} = 1.0
+  $$
 
   which for this quadratic puts the factor $|1 - 2\eta_{\text{eff}}|$ exactly
   at the oscillation boundary from two lessons ago. The general lesson: with

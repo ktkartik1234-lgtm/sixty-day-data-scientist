@@ -13,15 +13,21 @@ model's prediction **is** a matrix-vector product.
 A vector $\mathbf{x} = [x_1, \dots, x_d]^\top$ is one example described by $d$
 numbers. Two operations carry all the meaning:
 
-$$\mathbf{x} \cdot \mathbf{y} = \mathbf{x}^\top \mathbf{y} = \sum_{i=1}^{d} x_i y_i
-\qquad \text{(dot product — similarity)}$$
+$$
+\mathbf{x} \cdot \mathbf{y} = \mathbf{x}^\top \mathbf{y} = \sum_{i=1}^{d} x_i y_i
+\qquad \text{(dot product — similarity)}
+$$
 
-$$\lVert \mathbf{x} \rVert_2 = \sqrt{\mathbf{x}^\top \mathbf{x}}
-\qquad \text{(L2 norm — magnitude)}$$
+$$
+\lVert \mathbf{x} \rVert_2 = \sqrt{\mathbf{x}^\top \mathbf{x}}
+\qquad \text{(L2 norm — magnitude)}
+$$
 
 The dot product measures *alignment*. Cosine similarity normalizes it:
 
-$$\cos(\theta) = \frac{\mathbf{x}^\top \mathbf{y}}{\lVert \mathbf{x}\rVert \, \lVert \mathbf{y}\rVert}$$
+$$
+\cos(\theta) = \frac{\mathbf{x}^\top \mathbf{y}}{\lVert \mathbf{x}\rVert \, \lVert \mathbf{y}\rVert}
+$$
 
 <Callout kind="deep" title="Where you'll meet it">
   Cosine similarity over embeddings is the engine of retrieval-augmented
@@ -32,7 +38,9 @@ $$\cos(\theta) = \frac{\mathbf{x}^\top \mathbf{y}}{\lVert \mathbf{x}\rVert \, \l
 
 Multiplying by a matrix transforms space. For a linear model:
 
-$$\hat{\mathbf{y}} = X\mathbf{w} + b$$
+$$
+\hat{\mathbf{y}} = X\mathbf{w} + b
+$$
 
 each row of $X$ flows through the same transformation — which is why vectorized
 NumPy code beats Python loops by orders of magnitude.
@@ -41,7 +49,9 @@ NumPy code beats Python loops by orders of magnitude.
 
 For a square matrix $A$, an eigenvector $\mathbf{v}$ satisfies:
 
-$$A\mathbf{v} = \lambda \mathbf{v}$$
+$$
+A\mathbf{v} = \lambda \mathbf{v}
+$$
 
 the transformation only stretches it, doesn't rotate it. PCA (Day 21) works
 by finding the eigenvectors of the covariance matrix — the directions where
@@ -62,7 +72,9 @@ your data varies most.
 </Callout>
 
 <Solution>
-  $$A\mathbf{v} = \begin{bmatrix} 2 & 1 \\ 1 & 2 \end{bmatrix}\begin{bmatrix} 1 \\ 1 \end{bmatrix} = \begin{bmatrix} 2+1 \\ 1+2 \end{bmatrix} = \begin{bmatrix} 3 \\ 3 \end{bmatrix} = 3\,\mathbf{v}$$
+  $$
+A\mathbf{v} = \begin{bmatrix} 2 & 1 \\ 1 & 2 \end{bmatrix}\begin{bmatrix} 1 \\ 1 \end{bmatrix} = \begin{bmatrix} 2+1 \\ 1+2 \end{bmatrix} = \begin{bmatrix} 3 \\ 3 \end{bmatrix} = 3\,\mathbf{v}
+  $$
 
   So $\lambda = 3$: the all-ones direction gets stretched threefold. The other
   eigenvector is $[1, -1]^\top$ with $\lambda = 1$.

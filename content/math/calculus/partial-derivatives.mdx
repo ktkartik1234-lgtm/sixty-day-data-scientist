@@ -14,7 +14,9 @@ changing one thing at a time.
 A multivariable function eats a vector and returns one number. The squared
 error of a linear model is the canonical example:
 
-$$J(w, b) = \frac{1}{n} \sum_{i=1}^{n} \big(w x_i + b - y_i\big)^2$$
+$$
+J(w, b) = \frac{1}{n} \sum_{i=1}^{n} \big(w x_i + b - y_i\big)^2
+$$
 
 Plot it and you get a surface. Mark every point where $J = c$ for a few
 constants $c$ and you get **level sets** — the contour lines of a topographic
@@ -25,24 +27,30 @@ map. Keep that picture; it pays off in a moment.
 The partial derivative of $f$ with respect to $x$ is the ordinary derivative,
 taken while every other variable is frozen in place:
 
-$$\frac{\partial f}{\partial x} = \lim_{h \to 0}
-\frac{f(x+h,\; y) - f(x,\; y)}{h}$$
+$$
+\frac{\partial f}{\partial x} = \lim_{h \to 0}
+\frac{f(x+h,\; y) - f(x,\; y)}{h}
+$$
 
 All the single-variable rules apply unchanged — you just treat the other
 symbols as constants. For $f(x, y) = 3x^2 y$:
 
-$$\frac{\partial f}{\partial x} = 6xy \qquad\quad
-\frac{\partial f}{\partial y} = 3x^2$$
+$$
+\frac{\partial f}{\partial x} = 6xy \qquad\quad
+\frac{\partial f}{\partial y} = 3x^2
+$$
 
 ## The gradient — and the Jacobian
 
 Stack the $d$ partials into a vector, the **gradient**:
 
-$$\nabla f = \begin{bmatrix}
+$$
+\nabla f = \begin{bmatrix}
 \frac{\partial f}{\partial x_1} \\
 \vdots \\
 \frac{\partial f}{\partial x_d}
-\end{bmatrix}$$
+\end{bmatrix}
+$$
 
 Two facts make it the most reused object in machine learning:
 
@@ -76,18 +84,24 @@ With respect to $x$, holding $y$ fixed: the term $x^2 y$ differentiates by
 the power rule to $2xy$; the term $e^{xy}$ differentiates by the chain rule
 to $e^{xy} \cdot y$. So
 
-$$\frac{\partial f}{\partial x} = 2xy + y\, e^{xy}$$
+$$
+\frac{\partial f}{\partial x} = 2xy + y\, e^{xy}
+$$
 
 With respect to $y$, holding $x$ fixed: $x^2 y$ is linear in $y$ and gives
 $x^2$; $e^{xy}$ contributes $e^{xy} \cdot x$. So
 
-$$\frac{\partial f}{\partial y} = x^2 + x\, e^{xy}$$
+$$
+\frac{\partial f}{\partial y} = x^2 + x\, e^{xy}
+$$
 
 Evaluate at $(1, 1)$: the partials are $2 + e \approx 4.72$ and
 $1 + e \approx 3.72$, so
 
-$$\nabla f(1, 1) \approx (4.72, \; 3.72), \qquad
-\lVert \nabla f(1,1) \rVert \approx 6.0$$
+$$
+\nabla f(1, 1) \approx (4.72, \; 3.72), \qquad
+\lVert \nabla f(1,1) \rVert \approx 6.0
+$$
 
 The surface rises in every direction from this point, and the fastest way
 down is along the vector $(-4.72, \; -3.72)$.
@@ -119,7 +133,9 @@ down is along the vector $(-4.72, \; -3.72)$.
   (c) Steepest descent is $-\nabla J = (6, -4)$, with length
   $\sqrt{36 + 16} = \sqrt{52} \approx 7.21$. The unit direction is therefore
 
-  $$\frac{(6, -4)}{\sqrt{52}} \approx (0.83, \; -0.55)$$
+  $$
+\frac{(6, -4)}{\sqrt{52}} \approx (0.83, \; -0.55)
+  $$
 
   Notice the workflow: gradient, flip the sign, normalize. That is exactly
   what a gradient descent step does, just with the learning rate scaling the

@@ -17,8 +17,10 @@ standard deviation are fixed, usually unknown numbers, written $\mu$ and
 $\sigma$. A **sample** is the handful you happened to measure, yielding
 statistics $\bar{x}$ and $s$ that jump around from sample to sample:
 
-$$\bar{x} = \frac{1}{n}\sum_{i=1}^{n} x_i
-\qquad \text{(a random variable, not the truth)}$$
+$$
+\bar{x} = \frac{1}{n}\sum_{i=1}^{n} x_i
+\qquad \text{(a random variable, not the truth)}
+$$
 
 Machine learning lives exactly in this gap. Your training CSV is a sample;
 the deployed model must work on the population. When a validation report says
@@ -32,8 +34,10 @@ each mean, and collect the means into a histogram. That histogram is the
 **sampling distribution of the mean**, and the CLT makes a remarkable claim
 about it:
 
-$$\bar{X}_n \;\xrightarrow{\;d\;}\; \mathcal{N}\!\left(\mu,\; \frac{\sigma^2}{n}\right)
-\qquad \text{as } n \to \infty$$
+$$
+\bar{X}_n \;\xrightarrow{\;d\;}\; \mathcal{N}\!\left(\mu,\; \frac{\sigma^2}{n}\right)
+\qquad \text{as } n \to \infty
+$$
 
 Three claims are packed into that one line:
 
@@ -55,7 +59,9 @@ larger $n$ before the bell curve takes over.
 The standard deviation of the sampling distribution has its own name — the
 **standard error**:
 
-$$\text{SE} = \frac{\sigma}{\sqrt{n}}$$
+$$
+\text{SE} = \frac{\sigma}{\sqrt{n}}
+$$
 
 Since $\sigma$ is unknown, you estimate it with the sample standard
 deviation: $\widehat{\text{SE}} = s/\sqrt{n}$. Do not conflate the two kinds
@@ -122,13 +128,17 @@ and t-tests (the next lesson) are allowed to exist at all.
 <Solution>
   The standard error of the mean is
 
-  $$\text{SE} = \frac{s}{\sqrt{n}} = \frac{15}{\sqrt{100}} = 1.5 \text{ minutes}$$
+  $$
+\text{SE} = \frac{s}{\sqrt{n}} = \frac{15}{\sqrt{100}} = 1.5 \text{ minutes}
+  $$
 
   By the CLT, sample means are approximately normal, and a normal
   distribution puts about 95% of its mass within two standard errors of its
   center:
 
-  $$47 \pm 2 \times 1.5 \;=\; (44.0,\; 50.0) \text{ minutes}$$
+  $$
+47 \pm 2 \times 1.5 \;=\; (44.0,\; 50.0) \text{ minutes}
+  $$
 
   Notice the individual users scatter with $s = 15$ minutes, but the
   *average* of 100 users is ten times more stable at 1.5. And because of the
